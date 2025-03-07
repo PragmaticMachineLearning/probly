@@ -2,6 +2,7 @@
 
 import {} from "@/lib/file/import";
 
+import { BookOpen, MessageCircle } from "lucide-react";
 import { CellUpdate, ChatMessage } from "@/types/api";
 import {
   SpreadsheetProvider,
@@ -10,12 +11,9 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
-import { MessageCircle, BookOpen } from "lucide-react";
 import PromptLibrary from "@/components/PromptLibrary";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
-import { fileExport } from "@/lib/file/export";
-import path from "path";
 import { prepareChatHistory } from "@/utils/chatUtils";
 
 const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
