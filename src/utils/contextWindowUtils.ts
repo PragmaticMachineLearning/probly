@@ -193,6 +193,59 @@ export function sampleSpreadsheet(data: any[][]): any[][] {
 }
 
 /**
+ * Cleans spreadsheet data by removing empty rows and columns
+ * @param data Original spreadsheet data
+ * @returns Cleaned data with empty rows and columns removed
+ */
+export function cleanSpreadsheetData(data: any[][]): any[][] {
+  if (!data || !Array.isArray(data) || data.length === 0) return [[]];
+  
+  // Helper function to check if a cell is empty
+  const isEmpty = (cell: any): boolean => 
+    cell === null || cell === undefined || cell === "";
+  
+  // Helper function to check if a row is empty
+  const isRowEmpty = (row: any[]): boolean => 
+    !row || row.every(isEmpty);
+  
+  // Helper function to check if a column is empty
+  const isColumnEmpty = (data: any[][], colIndex: number): boolean => {
+    for (let rowIndex = 0; rowIndex < data.length; rowIndex++) {
+      const row = data[rowIndex];
+      if (row && colIndex < row.length && !isEmpty(row[colIndex])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  
+  // Step 1: Remove empty rows
+  const rowsFiltered = data.filter(row => !isRowEmpty(row));
+  
+  if (rowsFiltered.length === 0) return [[]];
+  
+  // Step 2: Find the maximum column count
+  const maxCols = Math.max(...rowsFiltered.map(row => row.length));
+  
+  // Step 3: Identify non-empty columns
+  const nonEmptyColumns: number[] = [];
+  for (let col = 0; col < maxCols; col++) {
+    if (!isColumnEmpty(rowsFiltered, col)) {
+      nonEmptyColumns.push(col);
+    }
+  }
+  
+  // Step 4: Create a new dataset with only non-empty columns
+  const cleaned = rowsFiltered.map(row => {
+    return nonEmptyColumns.map(col => {
+      return col < row.length ? row[col] : "";
+    });
+  });
+  
+  return cleaned;
+}
+
+/**
  * Creates a compact representation of spreadsheet data for LLM context
  */
 export function createSpreadsheetContext(data: any[][]): string {
@@ -200,11 +253,14 @@ export function createSpreadsheetContext(data: any[][]): string {
     return "Empty spreadsheet";
   }
   
+  // Clean the data first to remove empty rows and columns
+  const cleanedData = cleanSpreadsheetData(data);
+  
   // Check if spreadsheet is too large for full context
-  if (isSpreadsheetTooLarge(data)) {
-    // Get statistics and sample
-    const stats = analyzeSpreadsheet(data);
-    const sample = sampleSpreadsheet(data);
+  if (isSpreadsheetTooLarge(cleanedData)) {
+    // Get statistics and sample from cleaned data
+    const stats = analyzeSpreadsheet(cleanedData);
+    const sample = sampleSpreadsheet(cleanedData);
     
     // Format column information
     let columnInfo = '';
@@ -243,8 +299,8 @@ REPRESENTATIVE SAMPLE (${sample.length} rows x ${sample[0]?.length || 0} columns
     
     return summary + sampleText;
   } else {
-    // For smaller spreadsheets, use the existing formatting function
-    return "SPREADSHEET DATA:\n" + data.map(row => 
+    // For smaller spreadsheets, use the existing formatting function but with cleaned data
+    return "SPREADSHEET DATA:\n" + cleanedData.map(row => 
       row.map(cell => 
         cell === null || cell === undefined ? '' : 
         typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : String(cell)
