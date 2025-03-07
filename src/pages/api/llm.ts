@@ -9,6 +9,7 @@ import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
 import { convertToCSV } from "@/utils/dataUtils";
+import { createSpreadsheetContext } from "@/utils/contextWindowUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
@@ -45,17 +46,12 @@ async function handleLLMRequest(
   });
 
   try {
-    const data = formatSpreadsheetData(spreadsheetData);
-    
-    // Create context about sheets
-    const sheetsContext = sheetsInfo.length > 0 
-      ? `Available sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nCurrently active sheet: ${activeSheetName}\n`
-      : "";
-    
+    // Use our new context window utility
     const spreadsheetContext = spreadsheetData?.length
-      ? `${sheetsContext}Current spreadsheet data (${activeSheetName}):\n${data}\n`
-      : `${sheetsContext}The spreadsheet is empty.\n`;
-
+      ? `${createSpreadsheetContext(spreadsheetData)}\n`
+      : "";
+    console.log("SPREADSHEET CONTEXT SIZE >>>", spreadsheetContext.length);
+    console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
     const userMessage = `${spreadsheetContext}User question: ${message}`;
     
     // Format messages for OpenAI API
@@ -72,9 +68,10 @@ async function handleLLMRequest(
       stream: true,
     });
 
-    let accumulatedContent = "";
+    let buffer = '';
+    const chunkSize = 100; // Characters
+
     for await (const chunk of stream) {
-      // Check if client disconnected
       if (aborted) {
         console.log("Aborting stream processing");
         await stream.controller.abort();
@@ -83,14 +80,30 @@ async function handleLLMRequest(
 
       const content = chunk.choices[0]?.delta?.content || "";
       if (content) {
-        accumulatedContent += content;
-        res.write(
-          `data: ${JSON.stringify({
-            response: content,
-            streaming: true,
-          })}\n\n`,
-        );
+        buffer += content;
+        
+        // Only send to client when buffer reaches a certain size
+        // This reduces the number of network packets
+        if (buffer.length >= chunkSize) {
+          res.write(
+            `data: ${JSON.stringify({
+              response: buffer,
+              streaming: true,
+            })}\n\n`,
+          );
+          buffer = '';
+        }
       }
+    }
+
+    // Send any remaining buffer
+    if (buffer.length > 0) {
+      res.write(
+        `data: ${JSON.stringify({
+          response: buffer,
+          streaming: true,
+        })}\n\n`,
+      );
     }
 
     // Check again before making the tool call
@@ -99,8 +112,8 @@ async function handleLLMRequest(
     // Tool completion call
     const toolCompletion = await openai.chat.completions.create({
       messages: [
-        ...messages as any,
-        { role: "assistant", content: accumulatedContent },
+        ...messages,
+        { role: "assistant", content: buffer },
       ],
       model: model,
       tools: tools as any,
@@ -116,7 +129,7 @@ async function handleLLMRequest(
     if (toolCalls?.length) {
       const toolCall = toolCalls[0];
       let toolData: any = {
-        response: accumulatedContent,
+        response: buffer,
       };
 
       if (toolCall.function.name === "set_spreadsheet_cells") {
@@ -207,7 +220,7 @@ async function handleLLMRequest(
     } else if (!aborted) {
       res.write(
         `data: ${JSON.stringify({
-          response: accumulatedContent,
+          response: buffer,
           streaming: false,
         })}\n\n`,
       );
