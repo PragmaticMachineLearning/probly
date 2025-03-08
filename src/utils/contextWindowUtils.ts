@@ -250,57 +250,28 @@ export function cleanSpreadsheetData(data: any[][]): any[][] {
  */
 export function createSpreadsheetContext(data: any[][]): string {
   if (!data || !Array.isArray(data) || data.length === 0) {
-    return "Empty spreadsheet";
+    return "[]";
   }
   
-  // Clean the data first to remove empty rows and columns
   const cleanedData = cleanSpreadsheetData(data);
   
-  // Check if spreadsheet is too large for full context
   if (isSpreadsheetTooLarge(cleanedData)) {
-    // Get statistics and sample from cleaned data
     const stats = analyzeSpreadsheet(cleanedData);
     const sample = sampleSpreadsheet(cleanedData);
     
-    // Format column information
-    let columnInfo = '';
-    if (stats.hasHeaders && stats.columnNames) {
-      columnInfo = 'Column headers: ' + stats.columnNames.map((name, index) => 
-        `${index+1}:${name}`).join(', ') + '\n\n';
-    } else {
-      // Create summary of column data types
-      columnInfo = 'Column data types:\n';
-      Object.entries(stats.dataTypes).forEach(([col, types]) => {
-        if (types.length > 0) {
-          columnInfo += `Column ${parseInt(col)+1}: ${types.join('/')}\n`;
-        }
-      });
-      columnInfo += '\n';
-    }
+    // Minimal metadata prefix
+    const prefix = stats.hasHeaders ? "sample:" : "sample(no-headers):";
     
-    // Create summary text
-    const summary = `LARGE SPREADSHEET SUMMARY:
-Total rows: ${stats.rowCount}
-Total columns: ${stats.colCount}
-Non-empty cells: ${stats.nonEmptyCellCount}
-${stats.hasHeaders ? 'First row contains headers' : 'No headers detected'}
-
-${columnInfo}
-REPRESENTATIVE SAMPLE (${sample.length} rows x ${sample[0]?.length || 0} columns):
-`;
-    
-    // Format sample as CSV
-    const sampleText = sample.map(row => 
+    // Format as CSV with no extra whitespace
+    return prefix + sample.map(row => 
       row.map(cell => 
         cell === null || cell === undefined ? '' : 
         typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : String(cell)
       ).join(',')
     ).join('\n');
-    
-    return summary + sampleText;
   } else {
-    // For smaller spreadsheets, use the existing formatting function but with cleaned data
-    return "SPREADSHEET DATA:\n" + cleanedData.map(row => 
+    // For smaller spreadsheets, just return the data with no extra description
+    return cleanedData.map(row => 
       row.map(cell => 
         cell === null || cell === undefined ? '' : 
         typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : String(cell)

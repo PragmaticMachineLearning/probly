@@ -1,8 +1,7 @@
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import {
-  formatSpreadsheetData,
-  generateCellUpdates,
-  structureAnalysisOutput
+ generateCellUpdates,
+ structureAnalysisOutput
 } from "@/utils/analysisUtils";
 
 import { CellUpdate } from "@/types/api";
