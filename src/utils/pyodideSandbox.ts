@@ -1,4 +1,4 @@
-import { PyodideInterface } from '@/types/pyodide';
+import { PackageData, PyodideInterface } from '@/types/pyodide';
 
 interface SandboxResult {
   stdout: string;
@@ -7,62 +7,43 @@ interface SandboxResult {
 }
 
 export class PyodideSandbox {
-  private pyodide: any = null;
+  private pyodide: PyodideInterface | null = null;
   private initialized = false;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
-      // Only try to load Pyodide in browser environments
       if (typeof window !== 'undefined') {
-        // Browser environment - load from CDN
+        // Browser environment - use window.loadPyodide
         // @ts-ignore - loadPyodide is loaded from a script tag
-        this.pyodide = await loadPyodide({
+        this.pyodide = await window.loadPyodide({
           indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/'
         });
-        
-        // Initialize Python environment
-        await this.pyodide.loadPackagesFromImports(`
-          import pandas as pd
-          import numpy as np
-          import matplotlib.pyplot as plt
-          import io
-          import base64
-        `);
-        
-        this.initialized = true;
       } else {
-        // In Node.js environment (including Docker), we'll use a mock implementation
-        console.log("Running in Node.js environment - using mock Pyodide implementation");
-        this.mockPyodideImplementation();
-        this.initialized = true;
+        // Server environment - use the installed pyodide package
+        const { loadPyodide } = await import('pyodide');
+        this.pyodide = await loadPyodide();
       }
+      
+      if (!this.pyodide) {
+        throw new Error('Failed to initialize Pyodide');
+      }
+      
+      // Initialize Python environment with common data science packages
+      await this.pyodide.loadPackagesFromImports(`
+        import pandas as pd
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import io
+        import base64
+      `);
+      
+      this.initialized = true;
     } catch (error) {
       console.error('Failed to initialize Pyodide:', error);
       throw error;
     }
-  }
-
-  // Create a mock implementation for server-side rendering
-  private mockPyodideImplementation() {
-    console.log("Creating mock Pyodide implementation for server-side rendering");
-    this.pyodide = {
-      runPython: (code: string) => {
-        console.log("[Server] Mock Pyodide runPython called - this would run in browser");
-        return null;
-      },
-      runPythonAsync: async (code: string) => {
-        console.log("[Server] Mock Pyodide runPythonAsync called - this would run in browser");
-        return null;
-      },
-      setStdout: (options: { batched: (s: string) => void }) => {
-        console.log("[Server] Mock Pyodide setStdout called");
-      },
-      setStderr: (options: { batched: (s: string) => void }) => {
-        console.log("[Server] Mock Pyodide setStderr called");
-      }
-    };
   }
 
   async runDataAnalysis(
@@ -76,16 +57,6 @@ export class PyodideSandbox {
 
     if (!this.pyodide) {
       throw new Error('Pyodide not initialized');
-    }
-
-    // If we're in a server environment, return a mock result
-    if (typeof window === 'undefined') {
-      console.log("[Server] Returning mock analysis result - actual analysis will run in browser");
-      return {
-        stdout: "Pyodide analysis is only available in browser environments.\nServer received code:\n" + code,
-        stderr: "",
-        result: null
-      };
     }
 
     const stdout: string[] = [];
@@ -129,7 +100,7 @@ df = pd.read_csv(io.StringIO('''${csvData}'''))
   }
 
   async destroy(): Promise<void> {
-    if (this.pyodide && typeof window !== 'undefined') {
+    if (this.pyodide) {
       try {
         // Simple cleanup - just delete our main DataFrame
         await this.pyodide.runPython(`

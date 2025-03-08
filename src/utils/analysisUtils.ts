@@ -6,17 +6,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
-/**
- * Formats 2D array data into a structured representation suitable for LLM context
- * @param data - 2D array of spreadsheet data
- * @returns Formatted string representation
- */
-export function formatSpreadsheetData(data: any[][]): string {
-  if (!data || !Array.isArray(data)) return "";
-  
-  // Use the new context window utilities
-  return createSpreadsheetContext(data);
-}
+
 
 /**
  * Structures raw analysis output into a clean tabular format using LLM
