@@ -16,9 +16,10 @@ import { tools } from "@/constants/tools";
 dotenv.config();
 
 const openai = new OpenAI({
+  baseURL: process.env.OPENAI_API_BASE_URL || "",
   apiKey: process.env.OPENAI_API_KEY || "",
 });
-const model = "gpt-4o";
+const model = process.env.MODEL_NAME || "gpt-4o";
 
 async function handleLLMRequest(
   message: string,

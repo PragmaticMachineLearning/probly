@@ -21,8 +21,12 @@ COPY . .
 RUN mkdir -p ./public
 
 # Set environment variables with build-time defaults
+ARG OPENAI_API_BASE_URL
+ENV OPENAI_API_BASE_URL=$OPENAI_API_BASE_URL
 ARG OPENAI_API_KEY
 ENV OPENAI_API_KEY=$OPENAI_API_KEY
+ARG MODEL_NAME
+ENV MODEL_NAME=$MODEL_NAME
 
 # Build the application
 RUN npm run build

@@ -2,8 +2,10 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { OpenAI } from "openai";
 
 const openai = new OpenAI({
+  baseURL: process.env.OPENAI_API_BASE_URL || "",
   apiKey: process.env.OPENAI_API_KEY || "",
 });
+const model = process.env.MODEL_NAME || "gpt-4o";
 
 /**
  * Formats 2D array data into a structured XML-like string representation
@@ -88,7 +90,7 @@ export async function structureAnalysisOutput(rawOutput: string, analysisGoal: s
   ];
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: model,
     messages,
     temperature: 0.1,
   });

@@ -5,9 +5,13 @@ services:
     build:
       context: .
       args:
+        - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-}
         - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+        - MODEL_NAME=${MODEL_NAME:-}
     ports:
       - "3000:3000"
     environment:
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-}
     restart: unless-stopped 

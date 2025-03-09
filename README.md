@@ -4,6 +4,15 @@ An AI-powered spreadsheet application that combines spreadsheet functionality wi
 
 ![Probly Screenshot](docs/docs/assets/images/probly-screenshot.png)
 
+## Forked to add support for custom API base url and model name.
+
+Create a simple `.env` file with custom model service provider (Supports OpenAI SDK):
+```
+OPENAI_API_BASE_URL=custom_api_base_url_here
+OPENAI_API_KEY=your_api_key_here
+MODEL_NAME=custom_api_model_name_here
+```
+
 ## Features
 
 - **Interactive Spreadsheet**: Full-featured spreadsheet with formula support
