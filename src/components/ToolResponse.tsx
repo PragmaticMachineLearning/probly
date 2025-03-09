@@ -44,12 +44,30 @@ const ToolResponse: React.FC<ToolResponseProps> = ({
     
     // Extract column and row information from cell references
     const cellInfo = updates.map(update => {
-      const match = update.target.match(/([A-Z]+)(\d+)/);
-      if (!match) return null;
-      
-      const col = match[1];
-      const row = parseInt(match[2]);
-      return { col, row, formula: update.formula, target: update.target };
+      try {
+        if (!update?.target || typeof update.target !== 'string') {
+          console.warn('Invalid update target:', update);
+          return null;
+        }
+        
+        const match = update.target.match(/([A-Z]+)(\d+)/);
+        if (!match) {
+          console.warn('Invalid cell reference format:', update.target);
+          return null;
+        }
+        
+        const col = match[1];
+        const row = parseInt(match[2]);
+        if (isNaN(row)) {
+          console.warn('Invalid row number:', match[2]);
+          return null;
+        }
+        
+        return { col, row, formula: update.formula || '', target: update.target };
+      } catch (error) {
+        console.error('Error processing cell update:', error, update);
+        return null;
+      }
     }).filter(Boolean) as { col: string; row: number; formula: string; target: string }[];
     
     if (cellInfo.length === 0) return null;
@@ -237,4 +255,4 @@ const ToolResponse: React.FC<ToolResponseProps> = ({
   );
 };
 
-export default ToolResponse; 
+export default ToolResponse;
