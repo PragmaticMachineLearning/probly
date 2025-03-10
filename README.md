@@ -134,6 +134,10 @@ docker run -p 3000:3000 probly:custom
 
 For comprehensive documentation, visit the [Probly Documentation](https://probly-ai.readthedocs.io/en/latest/).
 
+## Community
+
+Join our [Discord server](https://discord.gg/S273ycM6zW) to connect with other users, get help, and stay updated on the latest developments.
+
 ## License
 
 [MIT License](LICENSE)
