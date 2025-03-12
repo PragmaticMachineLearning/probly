@@ -1,7 +1,5 @@
 # Probly
 
-[![Join our Discord](https://img.shields.io/discord/1234567890?color=7289DA&label=Discord&logo=discord&logoColor=white)](https://discord.gg/S273ycM6zW)
-
 An AI-powered spreadsheet application that combines spreadsheet functionality with Python data analysis capabilities.
 
 ![Probly Screenshot](docs/docs/assets/images/probly-screenshot.png)
