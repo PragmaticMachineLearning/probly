@@ -1,4 +1,3 @@
-import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import {
   formatSpreadsheetData,
   generateCellUpdates,
@@ -13,6 +12,14 @@ import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
+// Define a generic message type instead of using OpenAI's type
+interface ChatMessage {
+  role: "system" | "user" | "assistant" | "function";
+  content: string;
+  name?: string;
+  function_call?: any;
+}
+
 dotenv.config();
 
 const openai = new OpenAI({
@@ -23,7 +30,9 @@ const model = "gpt-4o";
 async function handleLLMRequest(
   message: string,
   spreadsheetData: any[][],
-  chatHistory: ChatCompletionMessageParam[],
+  chatHistory: any[],
+  activeSheetName: string = "Sheet 1",
+  sheetsInfo: { id: string, name: string }[] = [],
   res: any,
 ): Promise<void> {
   let aborted = false;
@@ -37,12 +46,20 @@ async function handleLLMRequest(
 
   try {
     const data = formatSpreadsheetData(spreadsheetData);
-    const spreadsheetContext = spreadsheetData?.length
-      ? `Current spreadsheet data:\n${data}\n`
+    
+    // Create context about sheets
+    const sheetsContext = sheetsInfo.length > 0 
+      ? `Available sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nCurrently active sheet: ${activeSheetName}\n`
       : "";
+    
+    const spreadsheetContext = spreadsheetData?.length
+      ? `${sheetsContext}Current spreadsheet data (${activeSheetName}):\n${data}\n`
+      : `${sheetsContext}The spreadsheet is empty.\n`;
 
     const userMessage = `${spreadsheetContext}User question: ${message}`;
-    const messages: ChatCompletionMessageParam[] = [
+    
+    // Format messages for OpenAI API
+    const messages = [
       { role: "system", content: SYSTEM_MESSAGE },
       ...chatHistory.slice(-10),
       { role: "user", content: userMessage },
@@ -50,7 +67,7 @@ async function handleLLMRequest(
 
     // First streaming call
     const stream = await openai.chat.completions.create({
-      messages,
+      messages: messages as any,
       model: model,
       stream: true,
     });
@@ -82,11 +99,11 @@ async function handleLLMRequest(
     // Tool completion call
     const toolCompletion = await openai.chat.completions.create({
       messages: [
-        ...messages,
+        ...messages as any,
         { role: "assistant", content: accumulatedContent },
       ],
       model: model,
-      tools: tools as ChatCompletionTool[],
+      tools: tools as any,
       stream: false,
     });
 
@@ -225,10 +242,10 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
 
     try {
-      const { message, spreadsheetData, chatHistory } = req.body;
+      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo } = req.body;
       // Race between the LLM request and the client disconnecting
       await Promise.race([
-        handleLLMRequest(message, spreadsheetData, chatHistory, res),
+        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res),
         disconnectPromise,
       ]);
     } catch (error: any) {

@@ -2,6 +2,7 @@
 
 import {} from "@/lib/file/import";
 
+import { BookOpen, MessageCircle } from "lucide-react";
 import { CellUpdate, ChatMessage } from "@/types/api";
 import {
   SpreadsheetProvider,
@@ -10,7 +11,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
-import { MessageCircle, BookOpen } from "lucide-react";
 import PromptLibrary from "@/components/PromptLibrary";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
@@ -29,7 +29,13 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
 
 const SpreadsheetApp = () => {
   const [spreadsheetData, setSpreadsheetData] = useState<any[][]>([]);
-  const { setFormulas, setChartData } = useSpreadsheet();
+  const { 
+    setFormulas, 
+    setChartData, 
+    sheets, 
+    activeSheetId, 
+    getActiveSheetData 
+  } = useSpreadsheet();
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
@@ -91,6 +97,12 @@ const SpreadsheetApp = () => {
     localStorage.setItem("chatHistory", JSON.stringify(chatHistory));
   }, [chatHistory]);
 
+  // Update spreadsheetData when active sheet changes
+  useEffect(() => {
+    const activeSheetData = getActiveSheetData();
+    setSpreadsheetData(activeSheetData);
+  }, [activeSheetId, getActiveSheetData]);
+
   const handleStop = () => {
     if (abortController.current) {
       abortController.current.abort();
@@ -114,12 +126,19 @@ const SpreadsheetApp = () => {
       abortController.current = new AbortController();
 
       const formattedHistory = prepareChatHistory(chatHistory);
+      
+      // Get the active sheet information
+      const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+      const activeSheetData = getActiveSheetData();
+      
       const response = await fetch("/api/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          spreadsheetData,
+          spreadsheetData: activeSheetData,
+          activeSheetName: activeSheet?.name || "Sheet 1",
+          sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
         }),
         signal: abortController.current.signal,
@@ -330,13 +349,7 @@ const SpreadsheetApp = () => {
           {/* Empty or for other controls */}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsPromptLibraryOpen(true)}
-            className="p-2 rounded hover:bg-gray-100 transition-colors"
-            title="Prompt Library (Ctrl+Shift+L)"
-          >
-            <BookOpen size={20} />
-          </button>
+        
           <button
             onClick={() => setIsChatOpen((prev) => !prev)}
             className="p-2 rounded hover:bg-gray-100 transition-colors"

@@ -2,6 +2,7 @@ import "handsontable/dist/handsontable.full.min.css";
 
 import * as XLSX from "xlsx";
 
+import { Edit2, PlusCircle, X } from "lucide-react";
 import {
   forwardRef,
   useEffect,
@@ -40,38 +41,74 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
   ({ onDataChange, initialData }, ref) => {
     const spreadsheetRef = useRef<HTMLDivElement>(null);
     const hotInstanceRef = useRef<any>(null);
-    const { formulaQueue, clearFormula, setFormulas } = useSpreadsheet();
+    const { 
+      formulaQueue, 
+      clearFormula, 
+      setFormulas,
+      // Sheet management
+      sheets,
+      activeSheetId,
+      addSheet,
+      removeSheet,
+      renameSheet,
+      setActiveSheet,
+      updateSheetData,
+      getActiveSheetData
+    } = useSpreadsheet();
+    
     const [currentData, setCurrentData] = useState(
-      initialData || [
-        ["", ""],
-        ["", ""],
-      ],
+      initialData || getActiveSheetData() || [["", ""], ["", ""]]
     );
     const [charts, setCharts] = useState<ChartInfo[]>([]);
     const [hiddenCharts, setHiddenCharts] = useState<number[]>([]);
     const [showChartPanel, setShowChartPanel] = useState(false);
+    const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+    const [newSheetName, setNewSheetName] = useState("");
 
     const handleImport = async (file: File) => {
       if (!file) return;
       try {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer);
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-
-        if (hotInstanceRef.current && worksheet) {
+        
+        // Create a new sheet for each sheet in the workbook
+        const importedSheets = workbook.SheetNames.map((sheetName, index) => {
+          const worksheet = workbook.Sheets[sheetName];
           const data = XLSX.utils.sheet_to_json(worksheet, {
             header: 1,
           }) as any[][];
+          
+          return {
+            id: `imported_${Date.now()}_${index}`,
+            name: sheetName,
+            data: data
+          };
+        });
+        
+        // Update the current sheet with the first imported sheet
+        if (importedSheets.length > 0 && hotInstanceRef.current) {
+          const firstSheetData = importedSheets[0].data;
           hotInstanceRef.current.updateSettings(
             {
-              data,
+              data: firstSheetData,
             },
             false,
           );
-
-          if (onDataChange) {
-            onDataChange(data);
-          }
+          
+          // Update the context with all imported sheets
+          importedSheets.forEach((sheet, index) => {
+            if (index === 0) {
+              // Update the active sheet
+              updateSheetData(activeSheetId, sheet.data);
+              if (onDataChange) {
+                onDataChange(sheet.data);
+              }
+            } else {
+              // Add additional sheets
+              addSheet();
+              updateSheetData(sheets[sheets.length - 1].id, sheet.data);
+            }
+          });
         }
       } catch (error) {
         console.error("Error importing spreadsheet:", error);
@@ -81,10 +118,17 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
 
     const handleExport = async () => {
       try {
-        if (hotInstanceRef.current) {
-          const data = hotInstanceRef.current.getData();
-          await fileExport(data);
-        }
+        // Create a workbook with all sheets
+        const workbook = XLSX.utils.book_new();
+        
+        // Add each sheet to the workbook
+        sheets.forEach(sheet => {
+          const worksheet = XLSX.utils.aoa_to_sheet(sheet.data);
+          XLSX.utils.book_append_sheet(workbook, worksheet, sheet.name);
+        });
+        
+        // Export the workbook
+        XLSX.writeFile(workbook, "spreadsheet.xlsx");
       } catch (error) {
         console.error("Error exporting spreadsheet:", error);
         alert("Error exporting file. Please try again.");
@@ -108,14 +152,16 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
             hotInstanceRef.current.setDataAtCell(row, col, formula);
             const newData = hotInstanceRef.current.getData();
             setCurrentData(newData);
+            updateSheetData(activeSheetId, newData);
             clearFormula(target);
           } catch (error) {
             console.error("Error setting formula:", error);
           }
         }
       });
-    }, [formulaQueue, clearFormula]);
+    }, [formulaQueue, clearFormula, activeSheetId, updateSheetData]);
 
+    // Initialize Handsontable when component mounts
     useEffect(() => {
       if (spreadsheetRef.current && !hotInstanceRef.current) {
         try {
@@ -130,8 +176,11 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
           hotInstanceRef.current.addHook('afterChange', (changes: any) => {
             if (changes) {
               const currentData = hotInstanceRef.current?.getData();
-              if (currentData && onDataChange) {
-                onDataChange(currentData);
+              if (currentData) {
+                updateSheetData(activeSheetId, currentData);
+                if (onDataChange) {
+                  onDataChange(currentData);
+                }
               }
             }
           });
@@ -148,6 +197,17 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       };
     }, []);
 
+    // Update Handsontable when active sheet changes
+    useEffect(() => {
+      const activeSheetData = getActiveSheetData();
+      setCurrentData(activeSheetData);
+      
+      if (hotInstanceRef.current) {
+        hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+      }
+    }, [activeSheetId, getActiveSheetData]);
+
+    // Update Handsontable when currentData changes
     useEffect(() => {
       if (hotInstanceRef.current && currentData) {
         hotInstanceRef.current.updateSettings({ data: currentData }, false);
@@ -233,6 +293,49 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       setHiddenCharts(prev => prev.filter(i => i !== index));
     };
 
+    const handleSheetClick = (sheetId: string) => {
+      setActiveSheet(sheetId);
+    };
+
+    const handleAddSheet = () => {
+      addSheet();
+    };
+
+    const handleRemoveSheet = (e: React.MouseEvent, sheetId: string) => {
+      e.stopPropagation();
+      if (sheets.length > 1) {
+        removeSheet(sheetId);
+      }
+    };
+
+    const startEditingSheet = (e: React.MouseEvent, sheetId: string) => {
+      e.stopPropagation();
+      const sheet = sheets.find(s => s.id === sheetId);
+      if (sheet) {
+        setEditingSheetId(sheetId);
+        setNewSheetName(sheet.name);
+      }
+    };
+
+    const handleSheetNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setNewSheetName(e.target.value);
+    };
+
+    const handleSheetNameSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (editingSheetId && newSheetName.trim()) {
+        renameSheet(editingSheetId, newSheetName.trim());
+        setEditingSheetId(null);
+      }
+    };
+
+    const handleSheetNameBlur = () => {
+      if (editingSheetId && newSheetName.trim()) {
+        renameSheet(editingSheetId, newSheetName.trim());
+      }
+      setEditingSheetId(null);
+    };
+
     return (
       <div className="h-full flex flex-col">
         <SpreadsheetToolbar
@@ -246,6 +349,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
           onExport={handleExport}
           onChart={() => setShowChartPanel(prev => !prev)}
         />
+        
         <div className="relative flex-1">
           <div ref={spreadsheetRef} className="w-full h-full" />
           
@@ -307,6 +411,63 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
               )}
             </div>
           )}
+        </div>
+        
+        {/* Sheet tabs - moved to bottom */}
+        <div className="flex items-center border-t border-gray-200 bg-gray-50 px-2 overflow-x-auto">
+          {sheets.map(sheet => (
+            <div 
+              key={sheet.id}
+              className={`flex items-center px-3 py-1.5 mr-1 cursor-pointer ${
+                activeSheetId === sheet.id 
+                  ? 'bg-white border-t border-l border-r border-gray-200 rounded-t-md -mt-px' 
+                  : 'bg-gray-100 hover:bg-gray-200 rounded-t-md mt-1'
+              }`}
+              onClick={() => handleSheetClick(sheet.id)}
+            >
+              {editingSheetId === sheet.id ? (
+                <form onSubmit={handleSheetNameSubmit}>
+                  <input
+                    type="text"
+                    value={newSheetName}
+                    onChange={handleSheetNameChange}
+                    onBlur={handleSheetNameBlur}
+                    autoFocus
+                    className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded"
+                    onClick={e => e.stopPropagation()}
+                  />
+                </form>
+              ) : (
+                <>
+                  <span className="text-sm truncate max-w-[100px]">{sheet.name}</span>
+                  <button 
+                    className="ml-2 p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200"
+                    onClick={(e) => startEditingSheet(e, sheet.id)}
+                    title="Rename sheet"
+                  >
+                    <Edit2 size={12} />
+                  </button>
+                  {sheets.length > 1 && (
+                    <button 
+                      className="ml-1 p-1 text-gray-500 hover:text-red-500 rounded-full hover:bg-gray-200"
+                      onClick={(e) => handleRemoveSheet(e, sheet.id)}
+                      title="Remove sheet"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+          <button 
+            className="flex items-center px-3 py-1.5 text-sm text-blue-600 hover:bg-gray-100 rounded-md mt-1"
+            onClick={handleAddSheet}
+            title="Add new sheet"
+          >
+            <PlusCircle size={16} className="mr-1" />
+            <span>New</span>
+          </button>
         </div>
       </div>
     );

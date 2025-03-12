@@ -17,7 +17,16 @@ const cellAddressToString = (address: any) => {
 // Create a persistent HyperFormula instance outside of the function scope
 const hyperformulaInstance = HyperFormula.buildEmpty({
   licenseKey: "gpl-v3",
+  // Enable multiple sheets support
+  maxRows: 1000,
+  maxColumns: 100,
+  useColumnIndex: true,
 });
+
+// Initialize with a default sheet
+if (hyperformulaInstance.getSheetNames().length === 0) {
+  hyperformulaInstance.addSheet("Sheet 1");
+}
 
 const getInitialConfig = (data: any[][]) => {
   return {
@@ -56,10 +65,42 @@ const getInitialConfig = (data: any[][]) => {
   };
 };
 
+// Add a function to add a new sheet to HyperFormula
+const addSheetToHyperFormula = (sheetName: string, data?: any[][]) => {
+  const sheetId = hyperformulaInstance.addSheet(sheetName);
+  
+  if (data && data.length > 0) {
+    // Set the data for the new sheet
+    hyperformulaInstance.setSheetContent(Number(sheetId), data);
+  }
+  
+  return sheetId;
+};
+
+// Function to switch active sheet in HyperFormula
+const setActiveHyperFormulaSheet = (sheetId: number) => {
+  // HyperFormula doesn't have a concept of "active sheet" for calculations,
+  // but we can use this for tracking purposes
+  return sheetId;
+};
+
+// Function to update sheet data in HyperFormula
+const updateHyperFormulaSheetData = (sheetId: number, data: any[][]) => {
+  hyperformulaInstance.setSheetContent(Number(sheetId), data);
+};
+
+// Function to get sheet ID by name
+const getSheetIdByName = (sheetName: string): number => {
+  const sheetNames = hyperformulaInstance.getSheetNames();
+  const sheetIndex = sheetNames.indexOf(sheetName);
+  return sheetIndex >= 0 ? sheetIndex : 0; // Return 0 (first sheet) if not found
+};
+
 const calculateCellValue = (
   formula: string,
   cellRef: string,
   cellValues: Map<string, any>,
+  sheetId: number = 0
 ) => {
   try {
     if (formula.startsWith("=")) {
@@ -72,30 +113,17 @@ const calculateCellValue = (
         hyperformulaInstance.setCellContents({
           col: cellAddress.c,
           row: cellAddress.r,
-          sheet: 0
+          sheet: sheetId
         }, existingValue);
       }
-
-      // // Parse hyperformula formula
-      // const ast = hyperformulaInstance.parseFormula(formula, {
-      //   col: cellAddress.c,
-      //   row: cellAddress.r,
-      //   sheet: 0
-      // });
-
-      // if (ast.error) {
-      //   console.error("HyperFormula parse error:", ast.error);
-      //   return "#ERROR";
-      // }
 
       // Calculate using HyperFormula
       const calculatedValue = hyperformulaInstance.getCellValue({
         col: cellAddress.c,
         row: cellAddress.r,
-        sheet: 0
+        sheet: sheetId
       });
       return calculatedValue;
-      // return hyperformulaInstance.getCellValue(cellAddress);
     }
     return formula; // If it's not a formula, just return the string
   } catch (e) {
@@ -109,4 +137,8 @@ export {
   hyperformulaInstance,
   getInitialConfig,
   cellAddressToString,
+  addSheetToHyperFormula,
+  setActiveHyperFormulaSheet,
+  updateHyperFormulaSheetData,
+  getSheetIdByName,
 };
