@@ -8,6 +8,7 @@ import {
   SpreadsheetProvider,
   useSpreadsheet,
 } from "@/context/SpreadsheetContext";
+import { isKeyCombo, prepareChatHistory } from "@/utils/chatUtils";
 import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
@@ -16,7 +17,6 @@ import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
 import { fileExport } from "@/lib/file/export";
 import path from "path";
-import { prepareChatHistory } from "@/utils/chatUtils";
 
 const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
   ssr: false,
@@ -47,18 +47,21 @@ const SpreadsheetApp = () => {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       // Toggle chat with Ctrl+Shift+?
-      if (e.ctrlKey && e.shiftKey && e.key === "?") {
+      if (isKeyCombo(e, "?", true, true)) {
         setIsChatOpen((prev) => !prev);
       }
       
       // Toggle prompt library with Ctrl+Shift+L
-      if (e.ctrlKey && e.shiftKey && e.key === "L") {
+      if (isKeyCombo(e, "L", true, true)) {
         setIsPromptLibraryOpen((prev) => !prev);
+        if (!isPromptLibraryOpen) {
+          setIsChatOpen(true); // Ensure chat is open when opening prompt library
+        }
       }
     };
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, []);
+  }, [isPromptLibraryOpen]);
 
   // Load chat open state from localStorage
   useEffect(() => {

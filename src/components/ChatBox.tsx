@@ -3,6 +3,7 @@ import { CellUpdate, ChatMessage } from "@/types/api";
 import { useEffect, useRef, useState } from "react";
 
 import ToolResponse from './ToolResponse';
+import { isKeyCombo } from '@/utils/chatUtils';
 import { predefinedPrompts } from '@/constants/prompts';
 
 interface Prompt {
@@ -92,6 +93,23 @@ const ChatBox = ({
         searchInputRef.current?.focus();
       }, 100);
     }
+  }, [showPromptLibrary]);
+
+  // Add keyboard shortcut for prompt library
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Toggle prompt library with Ctrl+Shift+L
+      if (isKeyCombo(e, "L", true, true)) {
+        setShowPromptLibrary(prev => !prev);
+        if (showPromptLibrary) {
+          setSearchQuery('');
+          setIsAddingPrompt(false);
+        }
+      }
+    };
+    
+    window.addEventListener("keydown", handleKeyPress);
+    return () => window.removeEventListener("keydown", handleKeyPress);
   }, [showPromptLibrary]);
 
   const handleSend = async () => {
@@ -227,14 +245,14 @@ const ChatBox = ({
         <div>
           <h2 className="font-semibold text-gray-800">Probly</h2>
           <p className="text-xs text-gray-500">
-            {showPromptLibrary ? "Prompt Library" : "Ask me about spreadsheet formulas"}
+            {showPromptLibrary ? "Prompt Library (Ctrl+Shift+L)" : "Ask me about spreadsheet formulas"}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={togglePromptLibrary}
             className={`p-2 ${showPromptLibrary ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:text-blue-500 hover:bg-blue-50'} rounded-full transition-all duration-200`}
-            title={showPromptLibrary ? "Back to chat" : "Open prompt library"}
+            title={showPromptLibrary ? "Back to chat (Ctrl+Shift+L)" : "Open prompt library (Ctrl+Shift+L)"}
           >
             <BookOpen size={18} />
           </button>
