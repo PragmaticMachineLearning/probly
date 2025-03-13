@@ -1,12 +1,61 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { OpenAI } from "openai";
-import { createSpreadsheetContext } from "./contextWindowUtils";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
+/**
+ * Formats 2D array data into a structured XML-like string representation
+ * @param data - 2D array of spreadsheet data
+ * @returns Formatted string with cell references
+ */
+export function formatSpreadsheetData(data: any[][]): string {
+  if (!data || !Array.isArray(data)) return "";
 
+  // Step 1: Compute max columns to precompute column references
+  const maxColumns = Math.max(...data.map(row => row.length), 0);
+  const columnRefs = Array.from({ length: maxColumns }, (_, i) => getColumnRef(i));
+
+  function getColumnRef(index: number): string {
+    let columnRef = "";
+    while (index >= 0) {
+      columnRef = String.fromCharCode((index % 26) + 65) + columnRef;
+      index = Math.floor(index / 26) - 1;
+    }
+    return columnRef;
+  }
+  
+  function isEmpty(cell: any): boolean {
+    return cell === null || cell === undefined || cell === "";
+  }
+
+  // Step 2: Process data efficiently
+  return data.reduce((acc, row, rowIndex) => {
+
+    // Check if the row is completely empty
+    if (row.every(isEmpty)) return acc;
+
+    // Find the last non-empty cell index
+    let lastNonEmptyIndex = row.length - 1;
+    while (lastNonEmptyIndex >= 0 && isEmpty(row[lastNonEmptyIndex])) {
+      lastNonEmptyIndex--;
+    }
+
+    if (lastNonEmptyIndex < 0) return acc; // Skip if no valid content
+
+    // Format the row
+    const rowContent = row.slice(0, lastNonEmptyIndex + 1).reduce((rowAcc, cell, colIndex) => {
+      if (isEmpty(cell)) return rowAcc;
+
+      const cellRef = `${columnRefs[colIndex]}${rowIndex + 1}`;
+
+      return rowAcc + `<${cellRef}>${cell}</${cellRef}>`;
+    }, "");
+
+    return acc + rowContent + "\n";
+  }, "");
+}
 
 /**
  * Structures raw analysis output into a clean tabular format using LLM
