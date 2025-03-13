@@ -3,6 +3,7 @@ import {
   addSheetToHyperFormula,
   calculateCellValue,
   getSheetIdByName,
+  hyperformulaInstance,
   updateHyperFormulaSheetData
 } from "@/lib/file/spreadsheet/config";
 
@@ -32,6 +33,7 @@ interface SpreadsheetContextType {
   removeSheet: (sheetId: string) => void;
   renameSheet: (sheetId: string, newName: string) => void;
   setActiveSheet: (sheetId: string) => void;
+  clearSheet: (sheetId: string) => void;
   updateSheetData: (sheetId: string, data: any[][]) => void;
   getActiveSheetData: () => any[][];
   getActiveSheetName: () => string;
@@ -170,67 +172,213 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
   // Sheet management functions
   const addSheet = () => {
     const newSheetName = generateSheetName(sheets);
-    // Add sheet to HyperFormula
-    const hyperFormulaId = addSheetToHyperFormula(newSheetName);
     
-    const newSheet: Sheet = {
-      id: generateId(),
-      name: newSheetName,
-      data: [["", ""], ["", ""]],
-      hyperFormulaId: Number(hyperFormulaId) // Ensure it's a number
-    };
+    // Check if we have a hidden first sheet we can reuse
+    const sheetNames = hyperformulaInstance.getSheetNames();
+    const firstSheetName = sheetNames[0];
     
-    setSheets(prev => [...prev, newSheet]);
-    setActiveSheetId(newSheet.id);
+    let hyperFormulaId: number;
+    
+    try {
+      // If the first sheet name starts with "_Unused_", it means it was hidden (not actually removed)
+      // and we can reuse it instead of adding a new one
+      if (firstSheetName && firstSheetName.startsWith('_Unused_') && 
+          !sheets.some(sheet => sheet.hyperFormulaId === 0)) {
+        // Reuse the first sheet by renaming it
+        hyperformulaInstance.renameSheet(0, newSheetName);
+        hyperFormulaId = 0;
+        
+        // Clear any existing content
+        hyperformulaInstance.clearSheet(0);
+      } else {
+        // Add a new sheet to HyperFormula
+        const newSheetId = hyperformulaInstance.addSheet(newSheetName);
+        hyperFormulaId = Number(newSheetId);
+        
+        // Ensure it's a valid number
+        if (isNaN(hyperFormulaId)) {
+          console.error("Invalid hyperFormulaId after adding sheet:", newSheetId);
+          const sheetId = hyperformulaInstance.getSheetId(newSheetName);
+          if (sheetId !== undefined) {
+            hyperFormulaId = sheetId;
+          } else {
+            // Fallback to a default value if we can't get a valid ID
+            console.error("Could not get valid sheet ID for new sheet, using fallback");
+            hyperFormulaId = sheets.length; // Use the current number of sheets as a fallback
+          }
+        }
+      }
+      
+      console.log(`Added new sheet: ${newSheetName} with HyperFormula ID: ${hyperFormulaId}`);
+      
+      // Initialize with empty data to ensure it doesn't inherit data from other sheets
+      const emptyData = [["", ""], ["", ""]];
+      hyperformulaInstance.setSheetContent(hyperFormulaId, emptyData);
+      
+      const newSheet: Sheet = {
+        id: generateId(),
+        name: newSheetName,
+        data: emptyData,
+        hyperFormulaId: hyperFormulaId
+      };
+      
+      setSheets(prev => [...prev, newSheet]);
+      setActiveSheetId(newSheet.id);
+    } catch (error) {
+      console.error("Error adding sheet:", error);
+    }
   };
 
   const removeSheet = (sheetId: string) => {
     // Don't allow removing the last sheet
     if (sheets.length <= 1) return;
     
-    setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+    // Find the sheet to remove
+    const sheetToRemove = sheets.find(sheet => sheet.id === sheetId);
+    if (!sheetToRemove) return;
     
-    // If we're removing the active sheet, switch to another one
-    if (activeSheetId === sheetId) {
-      const remainingSheets = sheets.filter(sheet => sheet.id !== sheetId);
-      setActiveSheetId(remainingSheets[0].id);
+    try {
+      // Get the index of the sheet we're removing
+      const sheetIndex = sheets.findIndex(sheet => sheet.id === sheetId);
+      
+      // If we're removing the active sheet, switch to another one first
+      if (activeSheetId === sheetId) {
+        // Find a new sheet to make active (prefer the one before, otherwise the one after)
+        const newActiveIndex = sheetIndex > 0 ? sheetIndex - 1 : sheetIndex + 1;
+        setActiveSheetId(sheets[newActiveIndex].id);
+      }
+      
+      // Check if the hyperFormulaId is valid
+      if (sheetToRemove.hyperFormulaId !== undefined && 
+          !isNaN(sheetToRemove.hyperFormulaId) && 
+          sheetToRemove.hyperFormulaId >= 0) {
+        
+        // Special handling for HyperFormula sheet removal
+        // HyperFormula doesn't allow removing sheet 0 (the first sheet)
+        if (sheetToRemove.hyperFormulaId === 0) {
+          // If we're trying to remove the first sheet, we need to:
+          // 1. Clear it instead of removing it
+          hyperformulaInstance.clearSheet(0);
+          
+          // 2. If there are other sheets, rename this one to indicate it's unused
+          if (sheets.length > 1) {
+            const unusedName = `_Unused_${Date.now()}`;
+            hyperformulaInstance.renameSheet(0, unusedName);
+            
+            // Update our state to reflect this sheet is now "removed" (but actually just hidden)
+            setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+          }
+        } else {
+          // For non-first sheets, we can remove them normally
+          hyperformulaInstance.removeSheet(sheetToRemove.hyperFormulaId);
+          
+          // Update our state
+          setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+        }
+      } else {
+        // If the hyperFormulaId is invalid, just remove it from our state
+        console.log("Sheet has invalid hyperFormulaId, removing from state only:", sheetToRemove);
+        setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+      }
+    } catch (error) {
+      console.error("Error removing sheet:", error);
+      // Even if there's an error with HyperFormula, still remove from our state
+      setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
     }
-    
-    // Note: We're not removing the sheet from HyperFormula as it doesn't support sheet removal
-    // In a production app, you might want to handle this differently
   };
 
   const renameSheet = (sheetId: string, newName: string) => {
-    setSheets(prev => 
-      prev.map(sheet => 
-        sheet.id === sheetId 
-          ? { ...sheet, name: newName } 
-          : sheet
-      )
-    );
+    // Find the sheet to rename
+    const sheetToRename = sheets.find(sheet => sheet.id === sheetId);
+    if (!sheetToRename || sheetToRename.hyperFormulaId === undefined) return;
     
-    // Note: HyperFormula doesn't support sheet renaming directly
-    // In a production app, you might want to handle this differently
+    try {
+      // Use HyperFormula's renameSheet method
+      hyperformulaInstance.renameSheet(sheetToRename.hyperFormulaId, newName);
+      
+      // Update our state
+      setSheets(prev => 
+        prev.map(sheet => 
+          sheet.id === sheetId 
+            ? { ...sheet, name: newName } 
+            : sheet
+        )
+      );
+    } catch (error) {
+      console.error("Error renaming sheet:", error);
+    }
   };
 
   const setActiveSheet = (sheetId: string) => {
     setActiveSheetId(sheetId);
   };
 
+  const clearSheet = (sheetId: string) => {
+    // Find the sheet to clear
+    const sheetToClear = sheets.find(sheet => sheet.id === sheetId);
+    if (!sheetToClear || sheetToClear.hyperFormulaId === undefined) return;
+    
+    try {
+      // Check if the sheet exists in HyperFormula
+      const sheetNames = hyperformulaInstance.getSheetNames();
+      const sheetExists = sheetToClear.hyperFormulaId < sheetNames.length;
+      
+      if (sheetExists) {
+        // Use HyperFormula's clearSheet method
+        const changes = hyperformulaInstance.clearSheet(sheetToClear.hyperFormulaId);
+        console.log("Sheet cleared with changes:", changes);
+        
+        // Update our state with empty data
+        setSheets(prev => 
+          prev.map(sheet => 
+            sheet.id === sheetId 
+              ? { ...sheet, data: [["", ""], ["", ""]] } 
+              : sheet
+          )
+        );
+      } else {
+        console.error("Attempted to clear a sheet that doesn't exist in HyperFormula:", sheetToClear);
+      }
+    } catch (error) {
+      console.error("Error clearing sheet:", error);
+    }
+  };
+
   const updateSheetData = (sheetId: string, data: any[][]) => {
-    setSheets(prev => {
-      const updatedSheets = prev.map(sheet => {
-        if (sheet.id === sheetId) {
-          // Update HyperFormula sheet data
-          if (sheet.hyperFormulaId !== undefined) {
-            updateHyperFormulaSheetData(sheet.hyperFormulaId, data);
-          }
-          return { ...sheet, data };
-        }
-        return sheet;
-      });
-      return updatedSheets;
-    });
+    // Find the sheet to update
+    const sheetToUpdate = sheets.find(sheet => sheet.id === sheetId);
+    if (!sheetToUpdate || sheetToUpdate.hyperFormulaId === undefined) return;
+    
+    try {
+      // Check if the sheet exists in HyperFormula
+      const sheetNames = hyperformulaInstance.getSheetNames();
+      const sheetExists = sheetToUpdate.hyperFormulaId < sheetNames.length;
+      
+      if (sheetExists) {
+        // Use HyperFormula's setSheetContent method
+        console.log(`Updating sheet ${sheetToUpdate.name} (ID: ${sheetId}, HyperFormula ID: ${sheetToUpdate.hyperFormulaId}) with data:`, data);
+        
+        // Important: We need to explicitly set the sheet content for this specific sheet
+        // to prevent data from being synced between sheets
+        const changes = hyperformulaInstance.setSheetContent(sheetToUpdate.hyperFormulaId, data);
+        console.log("Sheet updated with changes:", changes);
+        
+        // Update our state
+        setSheets(prev => {
+          const updatedSheets = prev.map(sheet => {
+            if (sheet.id === sheetId) {
+              return { ...sheet, data };
+            }
+            return sheet;
+          });
+          return updatedSheets;
+        });
+      } else {
+        console.error("Attempted to update a sheet that doesn't exist in HyperFormula:", sheetToUpdate);
+      }
+    } catch (error) {
+      console.error("Error updating sheet data:", error);
+    }
   };
 
   const getActiveSheetData = () => {
@@ -265,6 +413,7 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
         removeSheet,
         renameSheet,
         setActiveSheet,
+        clearSheet,
         updateSheetData,
         getActiveSheetData,
         getActiveSheetName,

@@ -18,7 +18,7 @@ import dynamic from "next/dynamic";
 import { fileExport } from "@/lib/file/export";
 import path from "path";
 
-const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
+const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod => mod.default), {
   ssr: false,
   loading: () => (
     <div className="flex-1 h-full flex items-center justify-center bg-gray-50 border rounded-lg">
@@ -27,14 +27,27 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
   ),
 });
 
+// Define PromptLibrary props interface to fix the linter error
+interface PromptLibraryProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectPrompt: (promptText: string) => void;
+}
+
 const SpreadsheetApp = () => {
   const [spreadsheetData, setSpreadsheetData] = useState<any[][]>([]);
   const { 
     setFormulas, 
     setChartData, 
     sheets, 
-    activeSheetId, 
-    getActiveSheetData 
+    activeSheetId,
+    addSheet,
+    removeSheet,
+    renameSheet,
+    clearSheet,
+    getSheetByName,
+    getActiveSheetData,
+    getActiveSheetName
   } = useSpreadsheet();
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -131,7 +144,7 @@ const SpreadsheetApp = () => {
       const formattedHistory = prepareChatHistory(chatHistory);
       
       // Get the active sheet information
-      const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+      const activeSheetName = getActiveSheetName();
       const activeSheetData = getActiveSheetData();
       
       const response = await fetch("/api/llm", {
@@ -140,7 +153,7 @@ const SpreadsheetApp = () => {
         body: JSON.stringify({
           message,
           spreadsheetData: activeSheetData,
-          activeSheetName: activeSheet?.name || "Sheet 1",
+          activeSheetName: activeSheetName,
           sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
         }),
@@ -170,6 +183,61 @@ const SpreadsheetApp = () => {
             try {
               const parsedData = JSON.parse(jsonData);
               lastParsedData = parsedData;
+              
+              // Handle sheet operations from LLM
+              if (parsedData.sheetOperation) {
+                const op = parsedData.sheetOperation;
+                
+                if (op.type === 'add' && op.sheetName) {
+                  // Add a new sheet
+                  addSheet();
+                  if (op.initialData) {
+                    // We need to wait for the state update to complete
+                    // before we can access the new sheet
+                    setTimeout(() => {
+                      // Get the last sheet (which should be the one we just added)
+                      const newSheet = sheets[sheets.length - 1];
+                      if (newSheet) {
+                        // We need to use the updateSheetData function from the context
+                        // but we can't directly reference it here due to scope issues
+                        // So we'll dispatch a custom event that the Spreadsheet component can listen for
+                        const customEvent = new CustomEvent('updateNewSheetData', {
+                          detail: {
+                            sheetId: newSheet.id,
+                            data: op.initialData
+                          }
+                        });
+                        window.dispatchEvent(customEvent);
+                      }
+                    }, 0);
+                  }
+                } 
+                else if (op.type === 'rename' && op.currentName && op.newName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.currentName);
+                  if (sheet) {
+                    // Rename the sheet
+                    renameSheet(sheet.id, op.newName);
+                  }
+                }
+                else if (op.type === 'clear' && op.sheetName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.sheetName);
+                  if (sheet) {
+                    // Clear the sheet
+                    clearSheet(sheet.id);
+                  }
+                }
+                else if (op.type === 'remove' && op.sheetName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.sheetName);
+                  if (sheet) {
+                    // Remove the sheet
+                    removeSheet(sheet.id);
+                  }
+                }
+              }
+              
               if (parsedData.response) {
                 if (parsedData.streaming) {
                   // For streaming content, append to the existing response

@@ -65,37 +65,118 @@ const getInitialConfig = (data: any[][]) => {
   };
 };
 
-// Add a function to add a new sheet to HyperFormula
-const addSheetToHyperFormula = (sheetName: string, data?: any[][]) => {
-  const sheetId = hyperformulaInstance.addSheet(sheetName);
-  
-  if (data && data.length > 0) {
-    // Set the data for the new sheet
-    hyperformulaInstance.setSheetContent(Number(sheetId), data);
+/**
+ * Add a new sheet to HyperFormula
+ * @param sheetName The name of the new sheet
+ * @param data Optional initial data for the sheet
+ * @returns The ID of the newly created sheet
+ */
+const addSheetToHyperFormula = (sheetName: string, data?: any[][]): number => {
+  try {
+    // Use HyperFormula's addSheet method
+    const sheetId = hyperformulaInstance.addSheet(sheetName);
+    
+    if (data && data.length > 0) {
+      // Set the data for the new sheet
+      hyperformulaInstance.setSheetContent(Number(sheetId), data);
+    }
+    
+    return Number(sheetId);
+  } catch (error) {
+    console.error("Error adding sheet to HyperFormula:", error);
+    throw error;
   }
-  
-  return sheetId;
 };
 
-// Function to switch active sheet in HyperFormula
-const setActiveHyperFormulaSheet = (sheetId: number) => {
-  // HyperFormula doesn't have a concept of "active sheet" for calculations,
-  // but we can use this for tracking purposes
-  return sheetId;
+/**
+ * Set the active sheet in HyperFormula
+ * @param sheetId The ID of the sheet to set as active
+ * @returns The ID of the active sheet
+ */
+const setActiveHyperFormulaSheet = (sheetId: number): number => {
+  try {
+    // HyperFormula doesn't have a direct "active sheet" concept
+    // but we can use this for tracking purposes
+    return sheetId;
+  } catch (error) {
+    console.error("Error setting active sheet in HyperFormula:", error);
+    throw error;
+  }
 };
 
-// Function to update sheet data in HyperFormula
-const updateHyperFormulaSheetData = (sheetId: number, data: any[][]) => {
-  hyperformulaInstance.setSheetContent(Number(sheetId), data);
+/**
+ * Update the content of a sheet in HyperFormula
+ * @param sheetId The ID of the sheet to update
+ * @param data The new data for the sheet
+ * @returns The changes made to the sheet
+ */
+const updateHyperFormulaSheetData = (sheetId: number, data: any[][]): any => {
+  try {
+    // Use HyperFormula's setSheetContent method
+    const changes = hyperformulaInstance.setSheetContent(sheetId, data);
+    return changes;
+  } catch (error) {
+    console.error("Error updating sheet data in HyperFormula:", error);
+    throw error;
+  }
 };
 
-// Function to get sheet ID by name
+/**
+ * Get the ID of a sheet by its name
+ * @param sheetName The name of the sheet
+ * @returns The ID of the sheet, or 0 if not found
+ */
 const getSheetIdByName = (sheetName: string): number => {
-  const sheetNames = hyperformulaInstance.getSheetNames();
-  const sheetIndex = sheetNames.indexOf(sheetName);
-  return sheetIndex >= 0 ? sheetIndex : 0; // Return 0 (first sheet) if not found
+  try {
+    const sheetNames = hyperformulaInstance.getSheetNames();
+    const sheetIndex = sheetNames.indexOf(sheetName);
+    return sheetIndex >= 0 ? sheetIndex : 0; // Return 0 (first sheet) if not found
+  } catch (error) {
+    console.error("Error getting sheet ID by name:", error);
+    return 0;
+  }
 };
 
+/**
+ * Clear the content of a sheet in HyperFormula
+ * @param sheetId The ID of the sheet to clear
+ * @returns The changes made to the sheet
+ */
+const clearHyperFormulaSheet = (sheetId: number): any => {
+  try {
+    // Use HyperFormula's clearSheet method
+    const changes = hyperformulaInstance.clearSheet(sheetId);
+    return changes;
+  } catch (error) {
+    console.error("Error clearing sheet in HyperFormula:", error);
+    throw error;
+  }
+};
+
+/**
+ * Rename a sheet in HyperFormula
+ * @param sheetId The ID of the sheet to rename
+ * @param newName The new name for the sheet
+ * @returns void
+ */
+const renameHyperFormulaSheet = (sheetId: number, newName: string): void => {
+  try {
+    // Use HyperFormula's renameSheet method
+    hyperformulaInstance.renameSheet(sheetId, newName);
+  } catch (error) {
+    console.error("Error renaming sheet in HyperFormula:", error);
+    throw error;
+  }
+};
+
+/**
+ * Calculate the value of a cell using HyperFormula
+ * @param formula The formula to calculate
+ * @param cellRef The cell reference (e.g., "A1")
+ * @param cellValues A map of cell values
+ * @param sheetId The ID of the sheet containing the cell
+ * @returns The calculated value
+ */
 const calculateCellValue = (
   formula: string,
   cellRef: string,
@@ -141,4 +222,6 @@ export {
   setActiveHyperFormulaSheet,
   updateHyperFormulaSheetData,
   getSheetIdByName,
+  clearHyperFormulaSheet,
+  renameHyperFormulaSheet,
 };

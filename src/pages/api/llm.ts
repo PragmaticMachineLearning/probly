@@ -49,9 +49,17 @@ async function handleLLMRequest(
     const spreadsheetContext = spreadsheetData?.length
       ? `${createSpreadsheetContext(spreadsheetData)}\n`
       : "";
+    
+    // Add information about available sheets
+    const sheetsContext = sheetsInfo?.length
+      ? `Available sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nActive sheet: ${activeSheetName}\n`
+      : "";
+    
     console.log("SPREADSHEET CONTEXT SIZE >>>", spreadsheetContext.length);
     console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
-    const userMessage = `${spreadsheetContext}User question: ${message}`;
+    console.log("SHEETS CONTEXT >>>", sheetsContext);
+    
+    const userMessage = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
     
     // Format messages for OpenAI API
     const messages = [
@@ -205,7 +213,36 @@ async function handleLLMRequest(
             await sandbox.destroy();
           }
         }
-      }
+      } else if (toolCall.function.name === "get_sheet_info") {
+        if (aborted) return;
+        
+        toolData.response = `Current sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nActive sheet: ${activeSheetName}`;
+      } else if (toolCall.function.name === "rename_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const { currentName, newName } = args;
+        
+        toolData.sheetOperation = {
+          type: 'rename',
+          currentName: currentName,
+          newName: newName
+        };
+        
+        toolData.response = `I've renamed the sheet "${currentName}" to "${newName}".`;
+      } else if (toolCall.function.name === "clear_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const sheetName = args.sheetName || activeSheetName;
+        
+        toolData.sheetOperation = {
+          type: 'clear',
+          sheetName: sheetName
+        };
+        
+        toolData.response = `I've cleared all data from the sheet "${sheetName}".`;
+      } 
 
       // Only send response if not aborted
       if (!aborted) {

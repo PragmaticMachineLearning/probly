@@ -119,4 +119,43 @@ export const tools: FunctionTool[] = [
       },
     },
   },
+  
+  {
+    type: "function",
+    function: {
+      name: "rename_sheet",
+      description: "Rename an existing sheet",
+      parameters: {
+        type: "object",
+        properties: {
+          currentName: {
+            type: "string",
+            description: "The current name of the sheet to rename"
+          },
+          newName: {
+            type: "string",
+            description: "The new name for the sheet"
+          }
+        },
+        required: ["currentName", "newName"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_sheet",
+      description: "Clear all data from a sheet",
+      parameters: {
+        type: "object",
+        properties: {
+          sheetName: {
+            type: "string",
+            description: "The name of the sheet to clear. If not provided, the active sheet will be cleared."
+          }
+        },
+        required: []
+      }
+    }
+  }
 ];

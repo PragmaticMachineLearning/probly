@@ -52,6 +52,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       removeSheet,
       renameSheet,
       setActiveSheet,
+      clearSheet,
       updateSheetData,
       getActiveSheetData
     } = useSpreadsheet();
@@ -106,7 +107,9 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
             } else {
               // Add additional sheets
               addSheet();
-              updateSheetData(sheets[sheets.length - 1].id, sheet.data);
+              // Get the ID of the newly added sheet (last in the array)
+              const newSheetId = sheets[sheets.length - 1].id;
+              updateSheetData(newSheetId, sheet.data);
             }
           });
         }
@@ -177,7 +180,14 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
             if (changes) {
               const currentData = hotInstanceRef.current?.getData();
               if (currentData) {
+                console.log(`Saving changes to active sheet: ${activeSheetId}`);
+                
+                // Update the data for the active sheet only
                 updateSheetData(activeSheetId, currentData);
+                
+                // Also update our local state
+                setCurrentData(currentData);
+                
                 if (onDataChange) {
                   onDataChange(currentData);
                 }
@@ -199,13 +209,20 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
 
     // Update Handsontable when active sheet changes
     useEffect(() => {
-      const activeSheetData = getActiveSheetData();
-      setCurrentData(activeSheetData);
-      
-      if (hotInstanceRef.current) {
-        hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+      const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+      if (activeSheet) {
+        console.log(`Active sheet changed to: ${activeSheet.name} (ID: ${activeSheetId}, HyperFormula ID: ${activeSheet.hyperFormulaId})`);
+        
+        // Get the active sheet's data
+        const activeSheetData = activeSheet.data || [["", ""], ["", ""]];
+        setCurrentData(activeSheetData);
+        
+        if (hotInstanceRef.current) {
+          // Update the UI with the active sheet's data
+          hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+        }
       }
-    }, [activeSheetId, getActiveSheetData]);
+    }, [activeSheetId, sheets]);
 
     // Update Handsontable when currentData changes
     useEffect(() => {
@@ -294,7 +311,23 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
     };
 
     const handleSheetClick = (sheetId: string) => {
+      // Find the sheet we're switching to
+      const targetSheet = sheets.find(sheet => sheet.id === sheetId);
+      if (!targetSheet) return;
+      
+      console.log(`Switching to sheet: ${targetSheet.name} (ID: ${sheetId}, HyperFormula ID: ${targetSheet.hyperFormulaId})`);
+      
+      // Set the active sheet in our context
       setActiveSheet(sheetId);
+      
+      // Update the UI with the sheet's data
+      if (hotInstanceRef.current) {
+        hotInstanceRef.current.updateSettings({ data: targetSheet.data }, false);
+        setCurrentData(targetSheet.data);
+        if (onDataChange) {
+          onDataChange(targetSheet.data);
+        }
+      }
     };
 
     const handleAddSheet = () => {
@@ -304,7 +337,46 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
     const handleRemoveSheet = (e: React.MouseEvent, sheetId: string) => {
       e.stopPropagation();
       if (sheets.length > 1) {
-        removeSheet(sheetId);
+        // Find the sheet we're removing
+        const sheetToRemove = sheets.find(sheet => sheet.id === sheetId);
+        if (sheetToRemove) {
+          const hyperFormulaId = sheetToRemove.hyperFormulaId !== undefined ? 
+            sheetToRemove.hyperFormulaId : 'undefined';
+            
+          console.log(`Removing sheet: ${sheetToRemove.name} (ID: ${sheetId}, HyperFormula ID: ${hyperFormulaId})`);
+          
+          // Remove the sheet
+          removeSheet(sheetId);
+          
+          // If this was the active sheet, the removeSheet function in SpreadsheetContext
+          // will have already switched to another sheet, so we just need to update the UI
+          if (sheetId === activeSheetId && hotInstanceRef.current) {
+            // Find the new active sheet
+            setTimeout(() => {
+              const activeSheetData = getActiveSheetData();
+              hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+              setCurrentData(activeSheetData);
+              if (onDataChange) {
+                onDataChange(activeSheetData);
+              }
+            }, 0);
+          }
+        }
+      }
+    };
+
+    const handleClearSheet = (e: React.MouseEvent, sheetId: string) => {
+      e.stopPropagation();
+      clearSheet(sheetId);
+      
+      // If this is the active sheet, update the UI
+      if (sheetId === activeSheetId && hotInstanceRef.current) {
+        const emptyData = [["", ""], ["", ""]];
+        hotInstanceRef.current.updateSettings({ data: emptyData }, false);
+        setCurrentData(emptyData);
+        if (onDataChange) {
+          onDataChange(emptyData);
+        }
       }
     };
 
@@ -335,6 +407,32 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       }
       setEditingSheetId(null);
     };
+
+    // Listen for custom events to update sheet data
+    useEffect(() => {
+      const handleUpdateNewSheetData = (event: any) => {
+        const { sheetId, data } = event.detail;
+        if (sheetId && data) {
+          console.log(`Received event to update sheet ${sheetId} with data:`, data);
+          updateSheetData(sheetId, data);
+          
+          // If this is the active sheet, also update the UI
+          if (sheetId === activeSheetId && hotInstanceRef.current) {
+            hotInstanceRef.current.updateSettings({ data }, false);
+            setCurrentData(data);
+            if (onDataChange) {
+              onDataChange(data);
+            }
+          }
+        }
+      };
+      
+      window.addEventListener('updateNewSheetData', handleUpdateNewSheetData);
+      
+      return () => {
+        window.removeEventListener('updateNewSheetData', handleUpdateNewSheetData);
+      };
+    }, [activeSheetId, updateSheetData, onDataChange]);
 
     return (
       <div className="h-full flex flex-col">
@@ -456,6 +554,13 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
                       <X size={12} />
                     </button>
                   )}
+                  <button 
+                    className="ml-1 p-1 text-gray-500 hover:text-blue-500 rounded-full hover:bg-gray-200"
+                    onClick={(e) => handleClearSheet(e, sheet.id)}
+                    title="Clear sheet"
+                  >
+                    <span className="text-xs">🧹</span>
+                  </button>
                 </>
               )}
             </div>
