@@ -278,4 +278,149 @@ export function createSpreadsheetContext(data: any[][]): string {
       ).join(',')
     ).join('\n');
   }
+}
+
+/**
+ * Converts column index to Excel-style column reference (A, B, C, ... Z, AA, AB, etc.)
+ */
+function getColumnRef(index: number): string {
+  let columnRef = "";
+  let i = index;
+  
+  while (i >= 0) {
+    columnRef = String.fromCharCode((i % 26) + 65) + columnRef;
+    i = Math.floor(i / 26) - 1;
+  }
+  
+  return columnRef;
+}
+
+/**
+ * Creates a spreadsheet context with minimal position markers for spatial awareness
+ * Balances token efficiency with providing spatial context to the LLM
+ */
+export function createSpreadsheetContextWithPosition(data: any[][]): string {
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    return "[]";
+  }
+  
+  const cleanedData = cleanSpreadsheetData(data);
+  
+  if (isSpreadsheetTooLarge(cleanedData)) {
+    const stats = analyzeSpreadsheet(cleanedData);
+    const sample = sampleSpreadsheet(cleanedData);
+    
+    // Get dimensions of the sample
+    const rowCount = sample.length;
+    const colCount = Math.max(...sample.map(row => row.length), 0);
+    const lastColRef = getColumnRef(colCount - 1);
+    
+    // Create a range reference (e.g., "A1:E10")
+    const rangeRef = `A1:${lastColRef}${rowCount}`;
+    
+    // Add column headers as first row
+    const columnHeaders = Array.from({ length: colCount }, (_, i) => getColumnRef(i)).join(',');
+    
+    // Format the sample with position information
+    const formattedSample = sample.map((row, rowIndex) => {
+      // Add row number at the beginning of each row
+      return `${rowIndex + 1},` + row.map(cell => 
+        cell === null || cell === undefined ? '' : 
+        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : String(cell)
+      ).join(',');
+    }).join('\n');
+    
+    return `Range: ${rangeRef}\n${stats.hasHeaders ? 'Has headers: true' : 'Has headers: false'}\n,${columnHeaders}\n${formattedSample}`;
+  } else {
+    // For smaller spreadsheets, include full position information
+    const rowCount = cleanedData.length;
+    const colCount = Math.max(...cleanedData.map(row => row.length), 0);
+    const lastColRef = getColumnRef(colCount - 1);
+    
+    // Create a range reference
+    const rangeRef = `A1:${lastColRef}${rowCount}`;
+    
+    // Add column headers as first row
+    const columnHeaders = Array.from({ length: colCount }, (_, i) => getColumnRef(i)).join(',');
+    
+    // Format with position information
+    const formattedData = cleanedData.map((row, rowIndex) => {
+      // Add row number at the beginning of each row
+      return `${rowIndex + 1},` + row.map(cell => 
+        cell === null || cell === undefined ? '' : 
+        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : String(cell)
+      ).join(',');
+    }).join('\n');
+    
+    return `Range: ${rangeRef}\n,${columnHeaders}\n${formattedData}`;
+  }
+}
+
+/**
+ * Creates a spreadsheet context with XML-style cell references for precise spatial information
+ * This approach is more token-intensive but provides exact cell positions
+ */
+export function createSpreadsheetContextWithXmlTags(data: any[][]): string {
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    return "[]";
+  }
+  
+  const cleanedData = cleanSpreadsheetData(data);
+  
+  // For large spreadsheets, we'll still sample but use XML tags
+  if (isSpreadsheetTooLarge(cleanedData)) {
+    const stats = analyzeSpreadsheet(cleanedData);
+    const sample = sampleSpreadsheet(cleanedData);
+    
+    // Add a prefix to indicate this is a sample
+    const prefix = stats.hasHeaders ? "sample with exact cell positions:\n" : "sample(no-headers) with exact cell positions:\n";
+    
+    return prefix + formatDataWithXmlTags(sample);
+  } else {
+    // For smaller spreadsheets, include all data with XML tags
+    return formatDataWithXmlTags(cleanedData);
+  }
+}
+
+/**
+ * Formats data with XML-style cell reference tags
+ * @param data - 2D array of spreadsheet data
+ * @returns Formatted string with cell references as XML tags
+ */
+function formatDataWithXmlTags(data: any[][]): string {
+  if (!data || !Array.isArray(data)) return "";
+
+  // Step 1: Compute max columns to precompute column references
+  const maxColumns = Math.max(...data.map(row => row.length), 0);
+  const columnRefs = Array.from({ length: maxColumns }, (_, i) => getColumnRef(i));
+
+  function isEmpty(cell: any): boolean {
+    return cell === null || cell === undefined || cell === "";
+  }
+
+  // Step 2: Process data efficiently
+  return data.reduce((acc, row, rowIndex) => {
+    // Check if the row is completely empty
+    if (row.every(isEmpty)) return acc;
+
+    // Find the last non-empty cell index
+    let lastNonEmptyIndex = row.length - 1;
+    while (lastNonEmptyIndex >= 0 && isEmpty(row[lastNonEmptyIndex])) {
+      lastNonEmptyIndex--;
+    }
+
+    if (lastNonEmptyIndex < 0) return acc; // Skip if no valid content
+
+    // Format the row
+    const rowContent = row.slice(0, lastNonEmptyIndex + 1).reduce((rowAcc, cell, colIndex) => {
+      if (isEmpty(cell)) return rowAcc;
+
+      const cellRef = `${columnRefs[colIndex]}${rowIndex + 1}`;
+      const cellValue = typeof cell === 'string' ? cell.replace(/</g, '&lt;').replace(/>/g, '&gt;') : cell;
+
+      return rowAcc + `<${cellRef}>${cellValue}</${cellRef}>`;
+    }, "");
+
+    return acc + rowContent + "\n";
+  }, "");
 } 

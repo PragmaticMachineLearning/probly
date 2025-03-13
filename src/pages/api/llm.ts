@@ -8,7 +8,7 @@ import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
 import { convertToCSV } from "@/utils/dataUtils";
-import { createSpreadsheetContext } from "@/utils/contextWindowUtils";
+import { createSpreadsheetContextWithXmlTags } from "@/utils/contextWindowUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
@@ -45,9 +45,9 @@ async function handleLLMRequest(
   });
 
   try {
-    // Use our new context window utility
+    // Use our XML tag-based context window utility for precise cell positions
     const spreadsheetContext = spreadsheetData?.length
-      ? `${createSpreadsheetContext(spreadsheetData)}\n`
+      ? `${createSpreadsheetContextWithXmlTags(spreadsheetData)}\n`
       : "";
     
     // Add information about available sheets
