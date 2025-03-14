@@ -2,7 +2,6 @@
 
 import {} from "@/lib/file/import";
 
-import { BookOpen, MessageCircle } from "lucide-react";
 import { CellUpdate, ChatMessage } from "@/types/api";
 import {
   SpreadsheetProvider,
@@ -12,11 +11,10 @@ import { isKeyCombo, prepareChatHistory } from "@/utils/chatUtils";
 import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
-import PromptLibrary from "@/components/PromptLibrary";
+import { MessageCircle } from "lucide-react";
+import { PromptLibraryProps } from "@/components/PromptLibrary";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
-import { fileExport } from "@/lib/file/export";
-import path from "path";
 
 const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod => mod.default), {
   ssr: false,
@@ -27,15 +25,10 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod =>
   ),
 });
 
-// Define PromptLibrary props interface to fix the linter error
-interface PromptLibraryProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSelectPrompt: (promptText: string) => void;
-}
+// Define a simple placeholder component for PromptLibrary
+const PromptLibrary: React.FC<PromptLibraryProps> = () => null;
 
 const SpreadsheetApp = () => {
-  const [spreadsheetData, setSpreadsheetData] = useState<any[][]>([]);
   const { 
     setFormulas, 
     setChartData, 
@@ -115,8 +108,8 @@ const SpreadsheetApp = () => {
 
   // Update spreadsheetData when active sheet changes
   useEffect(() => {
-    const activeSheetData = getActiveSheetData();
-    setSpreadsheetData(activeSheetData);
+    // This effect is no longer needed since we're not tracking spreadsheetData
+    // We can access the active sheet data directly when needed via getActiveSheetData()
   }, [activeSheetId, getActiveSheetData]);
 
   const handleStop = () => {
@@ -145,14 +138,13 @@ const SpreadsheetApp = () => {
       
       // Get the active sheet information
       const activeSheetName = getActiveSheetName();
-      const activeSheetData = getActiveSheetData();
       
       const response = await fetch("/api/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          spreadsheetData: activeSheetData,
+          spreadsheetData: getActiveSheetData(),
           activeSheetName: activeSheetName,
           sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
@@ -357,7 +349,8 @@ const SpreadsheetApp = () => {
   };
 
   const handleDataChange = (data: any[][]) => {
-    setSpreadsheetData(data);
+    // We don't need to store this data in state anymore
+    // If needed, we can get it from the spreadsheet context
   };
 
   const handleSelectPrompt = (promptText: string) => {
@@ -380,7 +373,7 @@ const SpreadsheetApp = () => {
       <div className="flex-1 p-4 overflow-hidden">
         <div className="flex gap-4 h-full relative">
           <div className="flex-1 bg-white rounded-lg shadow-sm">
-            <Spreadsheet ref={spreadsheetRef} onDataChange={handleDataChange} />
+            <Spreadsheet ref={spreadsheetRef} />
           </div>
           {/* Chat sidebar */}
           <div

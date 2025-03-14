@@ -57,16 +57,28 @@ const generateId = () => `sheet_${Date.now()}_${Math.random().toString(36).subst
 
 // Helper to generate default sheet names
 const generateSheetName = (sheets: Sheet[]) => {
+  // Extract all numeric sheet names (e.g., "Sheet 1", "Sheet 2")
   const existingNames = sheets.map(sheet => sheet.name);
-  let index = 1;
-  let name = `Sheet ${index}`;
   
-  while (existingNames.includes(name)) {
-    index++;
-    name = `Sheet ${index}`;
-  }
+  // Find the highest sheet number by extracting numbers from sheet names
+  let highestNumber = 0;
   
-  return name;
+  existingNames.forEach(name => {
+    // Match "Sheet X" pattern where X is a number
+    const match = name.match(/^Sheet\s+(\d+)$/);
+    if (match && match[1]) {
+      const sheetNumber = parseInt(match[1], 10);
+      if (!isNaN(sheetNumber) && sheetNumber > highestNumber) {
+        highestNumber = sheetNumber;
+      }
+    }
+  });
+  
+  // Use the next number after the highest existing number
+  const nextNumber = highestNumber + 1;
+  const newSheetName = `Sheet ${nextNumber}`;
+  
+  return newSheetName;
 };
 
 export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -171,6 +183,7 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Sheet management functions
   const addSheet = () => {
+    // Generate a new sheet name based on the highest existing sheet number
     const newSheetName = generateSheetName(sheets);
     
     // Check if we have a hidden first sheet we can reuse
@@ -262,6 +275,7 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
           
           // 2. If there are other sheets, rename this one to indicate it's unused
           if (sheets.length > 1) {
+            // Use a unique unused name that won't conflict with our naming scheme
             const unusedName = `_Unused_${Date.now()}`;
             hyperformulaInstance.renameSheet(0, unusedName);
             
