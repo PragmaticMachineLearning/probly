@@ -168,18 +168,15 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
     useEffect(() => {
       if (spreadsheetRef.current && !hotInstanceRef.current) {
         try {
+          // Get the initial config
           const config = getInitialConfig(currentData);
-          // Create a new instance with the config
-          hotInstanceRef.current = new Handsontable(
-            spreadsheetRef.current,
-            config
-          );
           
-          // Add the afterChange hook after instance creation
-          hotInstanceRef.current.addHook('afterChange', (changes: any) => {
+          // Add our custom afterChange hook to the config
+          config.afterChange = (changes: any) => {
             if (changes) {
               const currentData = hotInstanceRef.current?.getData();
               if (currentData) {
+                // Use the current activeSheetId from context
                 console.log(`Saving changes to active sheet: ${activeSheetId}`);
                 
                 // Update the data for the active sheet only
@@ -193,7 +190,13 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
                 }
               }
             }
-          });
+          };
+          
+          // Create a new instance with the config
+          hotInstanceRef.current = new Handsontable(
+            spreadsheetRef.current,
+            config
+          );
         } catch (error) {
           console.error("Error initializing spreadsheet:", error);
         }
@@ -220,6 +223,28 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
         if (hotInstanceRef.current) {
           // Update the UI with the active sheet's data
           hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+          
+          // Make sure the afterChange hook uses the current activeSheetId
+          hotInstanceRef.current.updateSettings({
+            afterChange: (changes: any) => {
+              if (changes) {
+                const currentData = hotInstanceRef.current?.getData();
+                if (currentData) {
+                  console.log(`Saving changes to active sheet: ${activeSheetId}`);
+                  
+                  // Update the data for the active sheet only
+                  updateSheetData(activeSheetId, currentData);
+                  
+                  // Also update our local state
+                  setCurrentData(currentData);
+                  
+                  if (onDataChange) {
+                    onDataChange(currentData);
+                  }
+                }
+              }
+            }
+          }, false);
         }
       }
     }, [activeSheetId, sheets]);
@@ -324,6 +349,29 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       if (hotInstanceRef.current) {
         hotInstanceRef.current.updateSettings({ data: targetSheet.data }, false);
         setCurrentData(targetSheet.data);
+        
+        // Update the afterChange hook to use the new active sheet ID
+        hotInstanceRef.current.updateSettings({
+          afterChange: (changes: any) => {
+            if (changes) {
+              const currentData = hotInstanceRef.current?.getData();
+              if (currentData) {
+                console.log(`Saving changes to active sheet: ${sheetId}`);
+                
+                // Update the data for the active sheet only
+                updateSheetData(sheetId, currentData);
+                
+                // Also update our local state
+                setCurrentData(currentData);
+                
+                if (onDataChange) {
+                  onDataChange(currentData);
+                }
+              }
+            }
+          }
+        }, false);
+        
         if (onDataChange) {
           onDataChange(targetSheet.data);
         }
