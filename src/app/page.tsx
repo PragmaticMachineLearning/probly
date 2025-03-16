@@ -407,16 +407,7 @@ const SpreadsheetApp = () => {
           {/* Empty or for other controls */}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setIsChatOpen(true);
-              setIsPromptLibraryOpen(true);
-            }}
-            className="p-2 rounded hover:bg-gray-100 transition-colors"
-            title="Open Prompt Library (Ctrl+Shift+L)"
-          >
-            <BookOpen size={20} />
-          </button>
+        
           <button
             onClick={() => setIsChatOpen((prev) => !prev)}
             className="p-2 rounded hover:bg-gray-100 transition-colors"
