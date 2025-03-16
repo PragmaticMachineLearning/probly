@@ -40,6 +40,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
   ({ onDataChange, initialData }, ref) => {
     const spreadsheetRef = useRef<HTMLDivElement>(null);
     const hotInstanceRef = useRef<any>(null);
+    const menuButtonRef = useRef<HTMLButtonElement>(null);
     const { 
       formulaQueue, 
       clearFormula, 
@@ -65,6 +66,11 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
     const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
     const [newSheetName, setNewSheetName] = useState("");
     const [showSheetMenu, setShowSheetMenu] = useState<string | null>(null);
+
+    // Add a debug effect to monitor sheet menu state
+    useEffect(() => {
+      console.log("Sheet menu state changed:", showSheetMenu);
+    }, [showSheetMenu]);
 
     const handleImport = async (file: File) => {
       if (!file) return;
@@ -605,75 +611,46 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
                 <>
                   <span className="text-sm truncate max-w-[100px]">{sheet.name}</span>
                   
-                  {/* Sheet menu button */}
-                  <button 
-                    className="ml-2 p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 sheet-menu-container"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowSheetMenu(showSheetMenu === sheet.id ? null : sheet.id);
-                      console.log("Clicked menu for sheet:", sheet.id, "Current showSheetMenu:", showSheetMenu);
-
-                    }}
-                    title="Sheet options"
-                  >
-                    <MoreHorizontal size={12} />
-                  </button>
-                  
-                  {/* Sheet menu popup */}
-                  {showSheetMenu === sheet.id && (
-                    <div 
-                      className="absolute top-full left-0 mt-1 bg-white shadow-md rounded-md border border-gray-200 z-50 w-36 sheet-menu-container"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button 
-                        className="flex items-center w-full px-3 py-2 text-xs text-left hover:bg-gray-100"
-                        onClick={(e) => {
-                          startEditingSheet(e, sheet.id);
-                          setShowSheetMenu(null);
-                        }}
-                      >
-                        <Edit size={12} className="mr-2" />
-                        Rename sheet
-                      </button>
-                      
-                      <button 
-                        className="flex items-center w-full px-3 py-2 text-xs text-left hover:bg-gray-100"
-                        onClick={(e) => {
-                          handleClearSheet(e, sheet.id);
-                          setShowSheetMenu(null);
-                          
-                        }}
-                      >
-                        <Trash2 size={12} className="mr-2" />
-                        Clear sheet
-                      </button>
-                      
-                      {sheets.length > 1 && (
-                        <button 
-                          className="flex items-center w-full px-3 py-2 text-xs text-left text-red-500 hover:bg-gray-100"
-                          onClick={(e) => {
-                            handleRemoveSheet(e, sheet.id);
-                            setShowSheetMenu(null);
-                          }}
-                        >
-                          <X size={12} className="mr-2" />
-                          Delete sheet
-                        </button>
-                      )}
-                      
-                    </div>
-                  )}
-                  
-                  {/* Remove sheet button - keep this outside the menu for quick access */}
-                  {sheets.length > 1 && (
+                  {/* Sheet actions */}
+                  <div className="flex items-center ml-2">
+                    {/* Rename button */}
                     <button 
-                      className="ml-1 p-1 text-gray-500 hover:text-red-500 rounded-full hover:bg-gray-200"
-                      onClick={(e) => handleRemoveSheet(e, sheet.id)}
-                      title="Remove sheet"
+                      className="p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 mx-0.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditingSheet(e, sheet.id);
+                      }}
+                      title="Rename sheet"
                     >
-                      <X size={12} />
+                      <Edit size={12} />
                     </button>
-                  )}
+                    
+                    {/* Clear button */}
+                    <button 
+                      className="p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 mx-0.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClearSheet(e, sheet.id);
+                      }}
+                      title="Clear sheet"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                    
+                    {/* Delete button - only show if there's more than one sheet */}
+                    {sheets.length > 1 && (
+                      <button 
+                        className="p-1 text-gray-500 hover:text-red-500 rounded-full hover:bg-gray-200 mx-0.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveSheet(e, sheet.id);
+                        }}
+                        title="Delete sheet"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
             </div>
