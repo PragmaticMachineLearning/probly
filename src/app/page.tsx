@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
 import { MessageCircle } from "lucide-react";
-import { PromptLibraryProps } from "@/components/PromptLibrary";
+import { BookOpen } from "lucide-react";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
 
@@ -24,9 +24,6 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod =>
     </div>
   ),
 });
-
-// Define a simple placeholder component for PromptLibrary
-const PromptLibrary: React.FC<PromptLibraryProps> = () => null;
 
 const SpreadsheetApp = () => {
   const { 
@@ -59,10 +56,12 @@ const SpreadsheetApp = () => {
       
       // Toggle prompt library with Ctrl+Shift+L
       if (isKeyCombo(e, "L", true, true)) {
-        setIsPromptLibraryOpen((prev) => !prev);
+        // Always ensure chat is open when opening prompt library
         if (!isPromptLibraryOpen) {
-          setIsChatOpen(true); // Ensure chat is open when opening prompt library
+          setIsChatOpen(true);
         }
+        // Toggle prompt library state
+        setIsPromptLibraryOpen((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKeyPress);
@@ -395,17 +394,12 @@ const SpreadsheetApp = () => {
               onReject={handleReject}
               message={message}
               setMessage={setMessage}
+              isPromptLibraryOpen={isPromptLibraryOpen}
+              setIsPromptLibraryOpen={setIsPromptLibraryOpen}
             />
           </div>
         </div>
       </div>
-
-      {/* Prompt Library Modal */}
-      <PromptLibrary 
-        isOpen={isPromptLibraryOpen}
-        onClose={() => setIsPromptLibraryOpen(false)}
-        onSelectPrompt={handleSelectPrompt}
-      />
 
       {/* Footer */}
       <div className="h-12 border-t border-gray-200 bg-white flex items-center justify-between px-4">
@@ -413,7 +407,16 @@ const SpreadsheetApp = () => {
           {/* Empty or for other controls */}
         </div>
         <div className="flex items-center gap-2">
-        
+          <button
+            onClick={() => {
+              setIsChatOpen(true);
+              setIsPromptLibraryOpen(true);
+            }}
+            className="p-2 rounded hover:bg-gray-100 transition-colors"
+            title="Open Prompt Library (Ctrl+Shift+L)"
+          >
+            <BookOpen size={20} />
+          </button>
           <button
             onClick={() => setIsChatOpen((prev) => !prev)}
             className="p-2 rounded hover:bg-gray-100 transition-colors"

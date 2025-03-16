@@ -21,6 +21,8 @@ interface ChatBoxProps {
   clearHistory: () => void;
   message: string;
   setMessage: React.Dispatch<React.SetStateAction<string>>;
+  isPromptLibraryOpen?: boolean;
+  setIsPromptLibraryOpen?: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const ChatBox = ({
@@ -32,6 +34,8 @@ const ChatBox = ({
   clearHistory,
   message,
   setMessage,
+  isPromptLibraryOpen: externalIsPromptLibraryOpen,
+  setIsPromptLibraryOpen: externalSetIsPromptLibraryOpen,
 }: ChatBoxProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [showPromptLibrary, setShowPromptLibrary] = useState(false);
@@ -42,6 +46,10 @@ const ChatBox = ({
   const [isAddingPrompt, setIsAddingPrompt] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   
+  // Use external state if provided, otherwise use internal state
+  const promptLibraryOpen = externalIsPromptLibraryOpen !== undefined ? externalIsPromptLibraryOpen : showPromptLibrary;
+  const setPromptLibraryOpen = externalSetIsPromptLibraryOpen || setShowPromptLibrary;
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -49,17 +57,24 @@ const ChatBox = ({
   // Load prompts from localStorage on mount
   useEffect(() => {
     const savedPrompts = localStorage.getItem('userPrompts');
+    let userPrompts: Prompt[] = [];
+    
     if (savedPrompts) {
       try {
-        const parsed = JSON.parse(savedPrompts);
-        setPrompts([...predefinedPrompts, ...parsed]);
+        userPrompts = JSON.parse(savedPrompts);
       } catch (error) {
         console.error('Error loading prompts:', error);
-        setPrompts([...predefinedPrompts]);
+        userPrompts = [];
       }
-    } else {
-      setPrompts([...predefinedPrompts]);
     }
+    
+    // Combine predefined prompts with user prompts, ensuring no duplicates by ID
+    const combinedPrompts = [
+      ...predefinedPrompts,
+      ...userPrompts.filter(up => !predefinedPrompts.some(pp => pp.id === up.id))
+    ];
+    
+    setPrompts(combinedPrompts);
   }, []);
 
   const scrollToBottom = () => {
@@ -88,20 +103,26 @@ const ChatBox = ({
 
   // Focus search input when prompt library opens
   useEffect(() => {
-    if (showPromptLibrary && searchInputRef.current) {
+    if (promptLibraryOpen && searchInputRef.current) {
       setTimeout(() => {
         searchInputRef.current?.focus();
       }, 100);
     }
-  }, [showPromptLibrary]);
+  }, [promptLibraryOpen]);
 
   // Add keyboard shortcut for prompt library
   useEffect(() => {
+    // We'll only handle keyboard shortcuts if we're using internal state
+    // If external state is provided, the parent component will handle the shortcuts
+    if (externalIsPromptLibraryOpen !== undefined) {
+      return;
+    }
+    
     const handleKeyPress = (e: KeyboardEvent) => {
       // Toggle prompt library with Ctrl+Shift+L
       if (isKeyCombo(e, "L", true, true)) {
-        setShowPromptLibrary(prev => !prev);
-        if (showPromptLibrary) {
+        setPromptLibraryOpen(prev => !prev);
+        if (promptLibraryOpen) {
           setSearchQuery('');
           setIsAddingPrompt(false);
         }
@@ -110,7 +131,7 @@ const ChatBox = ({
     
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [showPromptLibrary]);
+  }, [promptLibraryOpen, setPromptLibraryOpen, externalIsPromptLibraryOpen]);
 
   const handleSend = async () => {
     if (message.trim() || isLoading) {
@@ -153,7 +174,7 @@ const ChatBox = ({
 
   const handleSelectPrompt = (promptContent: string) => {
     setMessage(promptContent);
-    setShowPromptLibrary(false);
+    setPromptLibraryOpen(false);
     if (textareaRef.current) {
       setTimeout(() => {
         textareaRef.current?.focus();
@@ -166,15 +187,15 @@ const ChatBox = ({
   const handleSavePrompt = () => {
     if (!newPromptTitle.trim() || !newPromptContent.trim()) return;
     
+    let updatedPrompts;
+    
     if (editingPromptId) {
       // Update existing prompt
-      const updatedPrompts = prompts.map(prompt => 
+      updatedPrompts = prompts.map(prompt => 
         prompt.id === editingPromptId 
           ? { ...prompt, title: newPromptTitle.trim(), content: newPromptContent.trim() } 
           : prompt
       );
-      setPrompts(updatedPrompts);
-      setEditingPromptId(null);
     } else {
       // Create new prompt
       const newPrompt: Prompt = {
@@ -183,12 +204,13 @@ const ChatBox = ({
         content: newPromptContent.trim()
       };
       
-      const updatedPrompts = [...prompts, newPrompt];
-      setPrompts(updatedPrompts);
+      updatedPrompts = [...prompts, newPrompt];
     }
     
+    setPrompts(updatedPrompts);
+    
     // Save user prompts to localStorage (excluding predefined ones)
-    const userPrompts = prompts.filter(
+    const userPrompts = updatedPrompts.filter(
       prompt => !predefinedPrompts.some(p => p.id === prompt.id)
     );
     localStorage.setItem('userPrompts', JSON.stringify(userPrompts));
@@ -197,6 +219,7 @@ const ChatBox = ({
     setNewPromptTitle('');
     setNewPromptContent('');
     setIsAddingPrompt(false);
+    setEditingPromptId(null);
   };
 
   const handleEditPrompt = (prompt: Prompt) => {
@@ -231,8 +254,11 @@ const ChatBox = ({
   };
 
   const togglePromptLibrary = () => {
-    setShowPromptLibrary(!showPromptLibrary);
-    if (!showPromptLibrary) {
+    // Toggle the prompt library state
+    setPromptLibraryOpen(!promptLibraryOpen);
+    
+    // Reset search and form state when opening
+    if (!promptLibraryOpen) {
       setSearchQuery('');
       setIsAddingPrompt(false);
     }
@@ -245,18 +271,18 @@ const ChatBox = ({
         <div>
           <h2 className="font-semibold text-gray-800">Probly</h2>
           <p className="text-xs text-gray-500">
-            {showPromptLibrary ? "Prompt Library (Ctrl+Shift+L)" : "Ask me about spreadsheet formulas"}
+            {promptLibraryOpen ? "Prompt Library (Ctrl+Shift+L)" : "Ask me about spreadsheet formulas"}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={togglePromptLibrary}
-            className={`p-2 ${showPromptLibrary ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:text-blue-500 hover:bg-blue-50'} rounded-full transition-all duration-200`}
-            title={showPromptLibrary ? "Back to chat (Ctrl+Shift+L)" : "Open prompt library (Ctrl+Shift+L)"}
+            className={`p-2 ${promptLibraryOpen ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:text-blue-500 hover:bg-blue-50'} rounded-full transition-all duration-200`}
+            title={promptLibraryOpen ? "Back to chat (Ctrl+Shift+L)" : "Open prompt library (Ctrl+Shift+L)"}
           >
             <BookOpen size={18} />
           </button>
-          {!showPromptLibrary && (
+          {!promptLibraryOpen && (
             <button
               onClick={clearHistory}
               className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-full transition-all duration-200"
@@ -269,7 +295,7 @@ const ChatBox = ({
       </div>
 
       {/* Content Area - Either Chat History or Prompt Library */}
-      {showPromptLibrary ? (
+      {promptLibraryOpen ? (
         <div className="flex-1 flex flex-col">
           {/* Search and Add */}
           <div className="p-4 border-b border-gray-200">
