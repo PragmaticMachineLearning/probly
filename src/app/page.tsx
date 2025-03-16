@@ -7,18 +7,16 @@ import {
   SpreadsheetProvider,
   useSpreadsheet,
 } from "@/context/SpreadsheetContext";
+import { isKeyCombo, prepareChatHistory } from "@/utils/chatUtils";
 import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
-import { MessageCircle, BookOpen } from "lucide-react";
-import PromptLibrary from "@/components/PromptLibrary";
+import { MessageCircle } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
-import { fileExport } from "@/lib/file/export";
-import path from "path";
-import { prepareChatHistory } from "@/utils/chatUtils";
 
-const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
+const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod => mod.default), {
   ssr: false,
   loading: () => (
     <div className="flex-1 h-full flex items-center justify-center bg-gray-50 border rounded-lg">
@@ -28,8 +26,19 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet"), {
 });
 
 const SpreadsheetApp = () => {
-  const [spreadsheetData, setSpreadsheetData] = useState<any[][]>([]);
-  const { setFormulas, setChartData } = useSpreadsheet();
+  const { 
+    setFormulas, 
+    setChartData, 
+    sheets, 
+    activeSheetId,
+    addSheet,
+    removeSheet,
+    renameSheet,
+    clearSheet,
+    getSheetByName,
+    getActiveSheetData,
+    getActiveSheetName
+  } = useSpreadsheet();
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
@@ -41,18 +50,23 @@ const SpreadsheetApp = () => {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       // Toggle chat with Ctrl+Shift+?
-      if (e.ctrlKey && e.shiftKey && e.key === "?") {
+      if (isKeyCombo(e, "?", true, true)) {
         setIsChatOpen((prev) => !prev);
       }
       
       // Toggle prompt library with Ctrl+Shift+L
-      if (e.ctrlKey && e.shiftKey && e.key === "L") {
+      if (isKeyCombo(e, "L", true, true)) {
+        // Always ensure chat is open when opening prompt library
+        if (!isPromptLibraryOpen) {
+          setIsChatOpen(true);
+        }
+        // Toggle prompt library state
         setIsPromptLibraryOpen((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, []);
+  }, [isPromptLibraryOpen]);
 
   // Load chat open state from localStorage
   useEffect(() => {
@@ -91,6 +105,12 @@ const SpreadsheetApp = () => {
     localStorage.setItem("chatHistory", JSON.stringify(chatHistory));
   }, [chatHistory]);
 
+  // Update spreadsheetData when active sheet changes
+  useEffect(() => {
+    // This effect is no longer needed since we're not tracking spreadsheetData
+    // We can access the active sheet data directly when needed via getActiveSheetData()
+  }, [activeSheetId, getActiveSheetData]);
+
   const handleStop = () => {
     if (abortController.current) {
       abortController.current.abort();
@@ -114,12 +134,18 @@ const SpreadsheetApp = () => {
       abortController.current = new AbortController();
 
       const formattedHistory = prepareChatHistory(chatHistory);
+      
+      // Get the active sheet information
+      const activeSheetName = getActiveSheetName();
+      
       const response = await fetch("/api/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          spreadsheetData,
+          spreadsheetData: getActiveSheetData(),
+          activeSheetName: activeSheetName,
+          sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
         }),
         signal: abortController.current.signal,
@@ -148,6 +174,61 @@ const SpreadsheetApp = () => {
             try {
               const parsedData = JSON.parse(jsonData);
               lastParsedData = parsedData;
+              
+              // Handle sheet operations from LLM
+              if (parsedData.sheetOperation) {
+                const op = parsedData.sheetOperation;
+                
+                if (op.type === 'add' && op.sheetName) {
+                  // Add a new sheet
+                  addSheet();
+                  if (op.initialData) {
+                    // We need to wait for the state update to complete
+                    // before we can access the new sheet
+                    setTimeout(() => {
+                      // Get the last sheet (which should be the one we just added)
+                      const newSheet = sheets[sheets.length - 1];
+                      if (newSheet) {
+                        // We need to use the updateSheetData function from the context
+                        // but we can't directly reference it here due to scope issues
+                        // So we'll dispatch a custom event that the Spreadsheet component can listen for
+                        const customEvent = new CustomEvent('updateNewSheetData', {
+                          detail: {
+                            sheetId: newSheet.id,
+                            data: op.initialData
+                          }
+                        });
+                        window.dispatchEvent(customEvent);
+                      }
+                    }, 0);
+                  }
+                } 
+                else if (op.type === 'rename' && op.currentName && op.newName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.currentName);
+                  if (sheet) {
+                    // Rename the sheet
+                    renameSheet(sheet.id, op.newName);
+                  }
+                }
+                else if (op.type === 'clear' && op.sheetName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.sheetName);
+                  if (sheet) {
+                    // Clear the sheet
+                    clearSheet(sheet.id);
+                  }
+                }
+                else if (op.type === 'remove' && op.sheetName) {
+                  // Find the sheet by name
+                  const sheet = getSheetByName(op.sheetName);
+                  if (sheet) {
+                    // Remove the sheet
+                    removeSheet(sheet.id);
+                  }
+                }
+              }
+              
               if (parsedData.response) {
                 if (parsedData.streaming) {
                   // For streaming content, append to the existing response
@@ -267,7 +348,8 @@ const SpreadsheetApp = () => {
   };
 
   const handleDataChange = (data: any[][]) => {
-    setSpreadsheetData(data);
+    // We don't need to store this data in state anymore
+    // If needed, we can get it from the spreadsheet context
   };
 
   const handleSelectPrompt = (promptText: string) => {
@@ -290,7 +372,7 @@ const SpreadsheetApp = () => {
       <div className="flex-1 p-4 overflow-hidden">
         <div className="flex gap-4 h-full relative">
           <div className="flex-1 bg-white rounded-lg shadow-sm">
-            <Spreadsheet ref={spreadsheetRef} onDataChange={handleDataChange} />
+            <Spreadsheet ref={spreadsheetRef} />
           </div>
           {/* Chat sidebar */}
           <div
@@ -312,17 +394,12 @@ const SpreadsheetApp = () => {
               onReject={handleReject}
               message={message}
               setMessage={setMessage}
+              isPromptLibraryOpen={isPromptLibraryOpen}
+              setIsPromptLibraryOpen={setIsPromptLibraryOpen}
             />
           </div>
         </div>
       </div>
-
-      {/* Prompt Library Modal */}
-      <PromptLibrary 
-        isOpen={isPromptLibraryOpen}
-        onClose={() => setIsPromptLibraryOpen(false)}
-        onSelectPrompt={handleSelectPrompt}
-      />
 
       {/* Footer */}
       <div className="h-12 border-t border-gray-200 bg-white flex items-center justify-between px-4">
@@ -330,13 +407,7 @@ const SpreadsheetApp = () => {
           {/* Empty or for other controls */}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsPromptLibraryOpen(true)}
-            className="p-2 rounded hover:bg-gray-100 transition-colors"
-            title="Prompt Library (Ctrl+Shift+L)"
-          >
-            <BookOpen size={20} />
-          </button>
+        
           <button
             onClick={() => setIsChatOpen((prev) => !prev)}
             className="p-2 rounded hover:bg-gray-100 transition-colors"

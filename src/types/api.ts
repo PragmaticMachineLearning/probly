@@ -17,8 +17,9 @@ export interface ChatMessage {
 export interface CellUpdate {
   formula: string;
   target: string;
+  sheetName?: string;
 }
 
 export interface LLMResponse {
-  udpates: CellUpdate[];
+  updates: CellUpdate[];
 }

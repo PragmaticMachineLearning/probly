@@ -1,17 +1,23 @@
-import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import {
-  formatSpreadsheetData,
-  generateCellUpdates,
-  structureAnalysisOutput
+ formatSpreadsheetData,
+ generateCellUpdates,
+ structureAnalysisOutput
 } from "@/utils/analysisUtils";
 
-import { CellUpdate } from "@/types/api";
 import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
 import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
+
+// Define a generic message type instead of using OpenAI's type
+interface ChatMessage {
+  role: "system" | "user" | "assistant" | "function";
+  content: string;
+  name?: string;
+  function_call?: any;
+}
 
 dotenv.config();
 
@@ -23,7 +29,9 @@ const model = "gpt-4o";
 async function handleLLMRequest(
   message: string,
   spreadsheetData: any[][],
-  chatHistory: ChatCompletionMessageParam[],
+  chatHistory: any[],
+  activeSheetName: string = "Sheet 1",
+  sheetsInfo: { id: string, name: string }[] = [],
   res: any,
 ): Promise<void> {
   let aborted = false;
@@ -36,13 +44,24 @@ async function handleLLMRequest(
   });
 
   try {
-    const data = formatSpreadsheetData(spreadsheetData);
+    // Use our XML tag-based context window utility for precise cell positions
     const spreadsheetContext = spreadsheetData?.length
-      ? `Current spreadsheet data:\n${data}\n`
+      ? `${formatSpreadsheetData(spreadsheetData)}\n`
       : "";
-
-    const userMessage = `${spreadsheetContext}User question: ${message}`;
-    const messages: ChatCompletionMessageParam[] = [
+    
+    // Add information about available sheets
+    const sheetsContext = sheetsInfo?.length
+      ? `Available sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nActive sheet: ${activeSheetName}\n`
+      : "";
+    
+    console.log("SPREADSHEET CONTEXT SIZE >>>", spreadsheetContext.length);
+    console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
+    console.log("SHEETS CONTEXT >>>", sheetsContext);
+    
+    const userMessage = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
+    
+    // Format messages for OpenAI API
+    const messages = [
       { role: "system", content: SYSTEM_MESSAGE },
       ...chatHistory.slice(-10),
       { role: "user", content: userMessage },
@@ -50,14 +69,15 @@ async function handleLLMRequest(
 
     // First streaming call
     const stream = await openai.chat.completions.create({
-      messages,
+      messages: messages as any,
       model: model,
       stream: true,
     });
 
-    let accumulatedContent = "";
+    let buffer = '';
+    const chunkSize = 100; // Characters
+
     for await (const chunk of stream) {
-      // Check if client disconnected
       if (aborted) {
         console.log("Aborting stream processing");
         await stream.controller.abort();
@@ -66,14 +86,30 @@ async function handleLLMRequest(
 
       const content = chunk.choices[0]?.delta?.content || "";
       if (content) {
-        accumulatedContent += content;
-        res.write(
-          `data: ${JSON.stringify({
-            response: content,
-            streaming: true,
-          })}\n\n`,
-        );
+        buffer += content;
+        
+        // Only send to client when buffer reaches a certain size
+        // This reduces the number of network packets
+        if (buffer.length >= chunkSize) {
+          res.write(
+            `data: ${JSON.stringify({
+              response: buffer,
+              streaming: true,
+            })}\n\n`,
+          );
+          buffer = '';
+        }
       }
+    }
+
+    // Send any remaining buffer
+    if (buffer.length > 0) {
+      res.write(
+        `data: ${JSON.stringify({
+          response: buffer,
+          streaming: true,
+        })}\n\n`,
+      );
     }
 
     // Check again before making the tool call
@@ -83,10 +119,10 @@ async function handleLLMRequest(
     const toolCompletion = await openai.chat.completions.create({
       messages: [
         ...messages,
-        { role: "assistant", content: accumulatedContent },
+        { role: "assistant", content: buffer },
       ],
       model: model,
-      tools: tools as ChatCompletionTool[],
+      tools: tools as any,
       stream: false,
     });
 
@@ -99,7 +135,7 @@ async function handleLLMRequest(
     if (toolCalls?.length) {
       const toolCall = toolCalls[0];
       let toolData: any = {
-        response: accumulatedContent,
+        response: buffer,
       };
 
       if (toolCall.function.name === "set_spreadsheet_cells") {
@@ -176,7 +212,36 @@ async function handleLLMRequest(
             await sandbox.destroy();
           }
         }
-      }
+      } else if (toolCall.function.name === "get_sheet_info") {
+        if (aborted) return;
+        
+        toolData.response = `Current sheets: ${sheetsInfo.map(sheet => sheet.name).join(", ")}\nActive sheet: ${activeSheetName}`;
+      } else if (toolCall.function.name === "rename_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const { currentName, newName } = args;
+        
+        toolData.sheetOperation = {
+          type: 'rename',
+          currentName: currentName,
+          newName: newName
+        };
+        
+        toolData.response = `I've renamed the sheet "${currentName}" to "${newName}".`;
+      } else if (toolCall.function.name === "clear_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const sheetName = args.sheetName || activeSheetName;
+        
+        toolData.sheetOperation = {
+          type: 'clear',
+          sheetName: sheetName
+        };
+        
+        toolData.response = `I've cleared all data from the sheet "${sheetName}".`;
+      } 
 
       // Only send response if not aborted
       if (!aborted) {
@@ -190,7 +255,7 @@ async function handleLLMRequest(
     } else if (!aborted) {
       res.write(
         `data: ${JSON.stringify({
-          response: accumulatedContent,
+          response: buffer,
           streaming: false,
         })}\n\n`,
       );
@@ -225,10 +290,10 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
 
     try {
-      const { message, spreadsheetData, chatHistory } = req.body;
+      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo } = req.body;
       // Race between the LLM request and the client disconnecting
       await Promise.race([
-        handleLLMRequest(message, spreadsheetData, chatHistory, res),
+        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res),
         disconnectPromise,
       ]);
     } catch (error: any) {

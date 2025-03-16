@@ -1,5 +1,10 @@
+export interface PackageData {
+  name: string;
+  version: string;
+}
+
 export interface PyodideInterface {
-  loadPackagesFromImports(code: string): Promise<void>;
+  loadPackagesFromImports(code: string): Promise<PackageData[]>;
   runPython(code: string): any;
   runPythonAsync(code: string): Promise<any>;
   setStdout(options: { batched: (s: string) => void }): void;

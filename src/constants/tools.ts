@@ -1,6 +1,14 @@
-import type { ChatCompletionTool } from "openai/resources/chat/completions";
+// Define a generic tool type instead of using OpenAI's type
+interface FunctionTool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: any;
+  };
+}
 
-export const tools: ChatCompletionTool[] = [
+export const tools: FunctionTool[] = [
   {
     type: "function",
     function: {
@@ -16,6 +24,10 @@ export const tools: ChatCompletionTool[] = [
               properties: {
                 formula: { type: "string" },
                 target: { type: "string" },
+                sheetName: { 
+                  type: "string",
+                  description: "Optional. The name of the sheet to update. If not provided, the active sheet will be used."
+                }
               },
               required: ["formula", "target"],
               additionalProperties: false,
@@ -55,6 +67,10 @@ export const tools: ChatCompletionTool[] = [
             description:
               "The data for the chart, first row should contain headers",
           },
+          sheetName: {
+            type: "string",
+            description: "Optional. The name of the sheet the data is from. For reference only."
+          }
         },
         required: ["type", "title", "data"],
       },
@@ -82,9 +98,64 @@ export const tools: ChatCompletionTool[] = [
             description:
               "Start cell reference (e.g., 'A1') where the results should begin.",
           },
+          sheetName: {
+            type: "string",
+            description: "Optional. The name of the sheet to place results. If not provided, the active sheet will be used."
+          }
         },
         required: ["analysis_goal", "suggested_code", "start_cell"],
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_sheet_info",
+      description: "Get information about available sheets and the active sheet",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  
+  {
+    type: "function",
+    function: {
+      name: "rename_sheet",
+      description: "Rename an existing sheet",
+      parameters: {
+        type: "object",
+        properties: {
+          currentName: {
+            type: "string",
+            description: "The current name of the sheet to rename"
+          },
+          newName: {
+            type: "string",
+            description: "The new name for the sheet"
+          }
+        },
+        required: ["currentName", "newName"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_sheet",
+      description: "Clear all data from a sheet",
+      parameters: {
+        type: "object",
+        properties: {
+          sheetName: {
+            type: "string",
+            description: "The name of the sheet to clear. If not provided, the active sheet will be cleared."
+          }
+        },
+        required: []
+      }
+    }
+  }
 ];
