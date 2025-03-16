@@ -62,6 +62,7 @@ const getInitialConfig = (data: any[][]) => {
     },
     observeDomVisibility: true,
     observeChanges: true,
+    afterChange: (changes: any) => {}
   };
 };
 
