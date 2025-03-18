@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 
 import ChatBox from "@/components/ChatBox";
 import { MessageCircle } from "lucide-react";
-import { BookOpen } from "lucide-react";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
 import dynamic from "next/dynamic";
 

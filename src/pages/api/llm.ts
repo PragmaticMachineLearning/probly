@@ -241,7 +241,31 @@ async function handleLLMRequest(
         };
         
         toolData.response = `I've cleared all data from the sheet "${sheetName}".`;
+      } else if (toolCall.function.name === "add_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const sheetName = args.sheetName || "New Sheet";
+        
+        toolData.sheetOperation = {
+          type: 'add',
+          sheetName: sheetName
+        };
+        
+        toolData.response = `I've added a new sheet named "${sheetName}".`;
+      } else if (toolCall.function.name === "remove_sheet") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const sheetName = args.sheetName || activeSheetName;
+        toolData.sheetOperation = {
+          type: 'remove',
+          sheetName: sheetName
+        };
+        
+        toolData.response = `I've removed the sheet "${sheetName}".`;
       } 
+      
 
       // Only send response if not aborted
       if (!aborted) {
