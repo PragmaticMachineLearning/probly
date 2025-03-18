@@ -119,6 +119,39 @@ export const tools: FunctionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "add_sheet",
+      description: "Add a new sheet to the spreadsheet",
+      parameters: {
+        type: "object",
+        properties: {
+          sheetName: {
+            type: "string",
+            description: "The name of the new sheet to add"
+          }
+        },
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_sheet",
+      description: "Remove an existing sheet",
+      parameters: {
+        type: "object",
+        properties: {
+          sheetName: {
+            type: "string",
+            description: "The name of the sheet to remove"
+          }
+        },
+        required: ["sheetName"]
+      }
+    }
+  },
   
   {
     type: "function",
