@@ -190,5 +190,31 @@ export const tools: FunctionTool[] = [
         required: []
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "document_analysis",
+      description: "Extract and analyze information from uploaded documents like receipts, invoices, tables, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          operation: {
+            type: "string",
+            enum: ["extract_data", "extract_text", "extract_table", "analyze_receipt", "analyze_invoice"],
+            description: "The type of extraction or analysis to perform on the document"
+          },
+          target_sheet: {
+            type: "string", 
+            description: "Optional. The name of the sheet where extracted data should be placed. If not provided, the active sheet will be used."
+          },
+          start_cell: {
+            type: "string",
+            description: "The cell reference (e.g., 'A1') where extracted data should start. If not provided, data will be placed in an appropriate location."
+          }
+        },
+        required: ["operation", "start_cell"]
+      }
+    }
   }
 ];

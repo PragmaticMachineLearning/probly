@@ -5,6 +5,13 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
+// Interface for table conversion response
+export interface TableConversionResult {
+  headers: string[];
+  rows: string[][];
+  note?: string;
+}
+
 /**
  * Formats 2D array data into a structured XML-like string representation
  * @param data - 2D array of spreadsheet data
@@ -123,4 +130,75 @@ export function generateCellUpdates(structuredOutput: string, startCell: string)
       formula: value.toString()
     }))
   );
+}
+
+/**
+ * Converts complex JSON to tabular data suitable for spreadsheet display
+ * @param jsonData - Any JSON data structure to convert
+ * @param operationType - The type of operation used to extract the data
+ * @returns Promise<TableConversionResult> - Structured table data with headers and rows
+ */
+export async function convertJsonToTableData(
+  jsonData: any,
+  operationType: string
+): Promise<TableConversionResult> {
+  try {
+    const jsonString = JSON.stringify(jsonData, null, 2);
+    
+    const prompt = `
+Convert the following JSON data to a table format optimized for a spreadsheet. 
+The data was extracted from a document using the "${operationType}" operation.
+
+JSON DATA:
+${jsonString}
+
+Output a JSON object with exactly this structure:
+{
+  "headers": ["Column1", "Column2", ...],
+  "rows": [
+    ["row1col1", "row1col2", ...],
+    ["row2col1", "row2col2", ...],
+    ...
+  ],
+  "note": "Optional explanation about the data structure"
+}
+
+Guidelines:
+1. If the JSON has a simple key-value structure, make the keys one column and values another
+2. If the JSON has arrays of objects, extract all unique keys as columns
+3. For nested objects, flatten them appropriately or create multiple tables if necessary
+4. Ensure consistent data types in each column
+5. Include meaningful headers that describe the data
+6. Don't include more than 20 columns maximum
+7. Your response must be valid JSON that can be parsed with JSON.parse()
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0]?.message?.content || "{}";
+    
+    // Parse the response - it should be a valid JSON object
+    const tableData = JSON.parse(content) as TableConversionResult;
+    
+    // Validate the structure
+    if (!tableData.headers || !tableData.rows) {
+      throw new Error("Invalid table structure returned from LLM");
+    }
+    
+    return tableData;
+  } catch (error: any) {
+    console.error("Error converting JSON to table data:", error);
+    // Return a simple fallback structure with the error
+    return {
+      headers: ["Key", "Value"],
+      rows: [["Error", `Failed to convert JSON: ${error.message}`]]
+    };
+  }
 } 

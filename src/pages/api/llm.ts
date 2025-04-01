@@ -1,7 +1,9 @@
 import {
  formatSpreadsheetData,
  generateCellUpdates,
- structureAnalysisOutput
+ structureAnalysisOutput,
+ convertJsonToTableData,
+
 } from "@/utils/analysisUtils";
 
 import { OpenAI } from "openai";
@@ -11,13 +13,6 @@ import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
-// Define a generic message type instead of using OpenAI's type
-interface ChatMessage {
-  role: "system" | "user" | "assistant" | "function";
-  content: string;
-  name?: string;
-  function_call?: any;
-}
 
 dotenv.config();
 
@@ -33,6 +28,7 @@ async function handleLLMRequest(
   activeSheetName: string = "Sheet 1",
   sheetsInfo: { id: string, name: string }[] = [],
   res: any,
+  documentImage?: string,
 ): Promise<void> {
   let aborted = false;
   let sandbox: PyodideSandbox | null = null;
@@ -58,16 +54,26 @@ async function handleLLMRequest(
     console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
     console.log("SHEETS CONTEXT >>>", sheetsContext);
     
-    const userMessage = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
+    // Check if we have a document image
+    const hasDocumentImage = !!documentImage;
+    
+    // Standard text-only message for the initial request
+    let userMessageContent = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
+    
+    // If document is provided, add context about it but don't use vision capabilities yet
+    // We'll use vision in the document_analysis tool if needed
+    if (hasDocumentImage) {
+      userMessageContent += "\n\nI've uploaded a document that needs to be analyzed.";
+    }
     
     // Format messages for OpenAI API
     const messages = [
       { role: "system", content: SYSTEM_MESSAGE },
       ...chatHistory.slice(-10),
-      { role: "user", content: userMessage },
+      { role: "user", content: userMessageContent },
     ];
 
-    // First streaming call
+    // First streaming call - always use standard model
     const stream = await openai.chat.completions.create({
       messages: messages as any,
       model: model,
@@ -115,7 +121,7 @@ async function handleLLMRequest(
     // Check again before making the tool call
     if (aborted) return;
 
-    // Tool completion call
+    // Tool completion call - always use standard model
     const toolCompletion = await openai.chat.completions.create({
       messages: [
         ...messages,
@@ -264,9 +270,114 @@ async function handleLLMRequest(
         };
         
         toolData.response = `I've removed the sheet "${sheetName}".`;
-      } 
+      } else if (toolCall.function.name === "document_analysis") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const { operation, target_sheet, start_cell } = args;
+        console.log("OPERATION >>>", operation);
+        console.log("TARGET SHEET >>>", target_sheet);
+        console.log("START CELL >>>", start_cell);
+        
+        // We need the document image for analysis
+        if (!documentImage) {
+          toolData.response = "Error: No document image provided for analysis.";
+        } else {
+          try {
+            // Make a second call to the OpenAI Vision API to analyze the document
+            const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
+            Format the output as a structured JSON object that can be used to populate a spreadsheet.
+            If extracting a table, create an array of objects with consistent keys.
+            Include metadata about the document if relevant (e.g., date, total amount, etc.).`;
+            
+            const visionResponse = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: visionPrompt },
+                    { type: "image_url", image_url: { url: documentImage } }
+                  ]
+                }
+              ],
+              max_tokens: 1500
+            });
+            
+            const visionResult = visionResponse.choices[0]?.message?.content || "{}";
+            console.log("VISION RESULT >>>", visionResult);
+            
+            // Try to parse the result as JSON
+            let extractedData;
+            try {
+              // Check if the result is wrapped in a code block with backticks
+              let jsonText = visionResult;
+              
+              // Handle ```json code blocks - use [\s\S]* instead of .* with s flag
+              const jsonBlockMatch = visionResult.match(/```(?:json)?\s*([\s\S]+?)```/);
+              if (jsonBlockMatch && jsonBlockMatch[1]) {
+                jsonText = jsonBlockMatch[1];
+              }
+              
+              // Clean any remaining whitespace
+              jsonText = jsonText.trim();
+              
+              extractedData = JSON.parse(jsonText);
+            } catch (e: any) {
+              // If the result is not valid JSON, use text processing to extract structured data
+              console.log("Error parsing JSON from vision API, using raw text instead:", e);
+              extractedData = { text: visionResult };
+            }
+            
+            // Use LLM to convert the JSON to tabular format
+            const tableData = await convertJsonToTableData(extractedData, operation);
+            
+            // Generate cell updates based on the table data
+            const updates: Array<{target: string, formula: string, sheetName: string}> = [];
+            
+            if (start_cell) {
+              const col = start_cell[0].toUpperCase();
+              const rowNum = parseInt(start_cell.substring(1));
+              
+              // Add headers
+              tableData.headers.forEach((header, index) => {
+                updates.push({
+                  target: `${String.fromCharCode(col.charCodeAt(0) + index)}${rowNum}`,
+                  formula: header,
+                  sheetName: target_sheet || activeSheetName
+                });
+              });
+              
+              // Add data rows
+              tableData.rows.forEach((row, rowIndex) => {
+                row.forEach((cell, colIndex) => {
+                  updates.push({
+                    target: `${String.fromCharCode(col.charCodeAt(0) + colIndex)}${rowNum + rowIndex + 1}`,
+                    formula: cell,
+                    sheetName: target_sheet || activeSheetName
+                  });
+                });
+              });
+            }
+            
+            toolData.updates = updates;
+            
+            // Include note from table conversion if available
+            const noteText = tableData.note ? `\n\nNote: ${tableData.note}` : '';
+            toolData.response = `Successfully extracted data using ${operation.replace('_', ' ')}. The data has been placed in your spreadsheet${start_cell ? ` starting at cell ${start_cell}` : ''}.${noteText}`;
+            
+            // Add metadata about the extraction for display purposes
+            toolData.analysis = {
+              goal: `Document ${operation.replace('_', ' ')}`,
+              output: visionResult,
+            };
+          } catch (error: any) {
+            console.error("Error processing document:", error);
+            toolData.response = `Error processing document: ${error.message || "Unknown error"}`;
+          }
+        }
+      }
       
-
       // Only send response if not aborted
       if (!aborted) {
         res.write(
@@ -314,10 +425,10 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
 
     try {
-      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo } = req.body;
+      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, documentImage } = req.body;
       // Race between the LLM request and the client disconnecting
       await Promise.race([
-        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res),
+        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res, documentImage),
         disconnectPromise,
       ]);
     } catch (error: any) {

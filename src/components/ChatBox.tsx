@@ -1,4 +1,4 @@
-import { BookOpen, Check, Edit2, Loader2, Plus, Save, Search, Send, Square, Trash2, X } from "lucide-react";
+import { BookOpen, Check, Edit2, FileUp, Loader2, Plus, Save, Search, Send, Square, Trash2, X } from "lucide-react";
 import { CellUpdate, ChatMessage } from "@/types/api";
 import { useEffect, useRef, useState } from "react";
 
@@ -13,7 +13,7 @@ interface Prompt {
 }
 
 interface ChatBoxProps {
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, documentImage?: string) => Promise<void>;
   onStop: () => void;
   onAccept: (updates: CellUpdate[], messageId: string) => void;
   onReject: (messageId: string) => void;
@@ -45,6 +45,9 @@ const ChatBox = ({
   const [newPromptContent, setNewPromptContent] = useState('');
   const [isAddingPrompt, setIsAddingPrompt] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Use external state if provided, otherwise use internal state
   const promptLibraryOpen = externalIsPromptLibraryOpen !== undefined ? externalIsPromptLibraryOpen : showPromptLibrary;
@@ -144,7 +147,9 @@ const ChatBox = ({
       setMessage("");
       setIsLoading(true);
       try {
-        await onSend(messageToSend);
+        await onSend(messageToSend, uploadedDocument || undefined);
+        // Clear the uploaded document after sending
+        setUploadedDocument(null);
       } catch (error) {
         console.error("Error details:", error);
       }
@@ -262,6 +267,37 @@ const ChatBox = ({
       setSearchQuery('');
       setIsAddingPrompt(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      setUploadingDocument(true);
+      
+      // Convert the file to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      
+      setUploadedDocument(base64);
+    } catch (error) {
+      console.error("Error uploading document:", error);
+    } finally {
+      setUploadingDocument(false);
+      // Reset the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveDocument = () => {
+    setUploadedDocument(null);
   };
 
   return (
@@ -491,6 +527,21 @@ const ChatBox = ({
 
           {/* Input Area */}
           <div className="p-4 bg-white border-t border-gray-200">
+            {uploadedDocument && (
+              <div className="mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-blue-700">
+                  <FileUp size={16} />
+                  <span className="truncate">Document ready to send</span>
+                </div>
+                <button 
+                  onClick={handleRemoveDocument}
+                  className="text-blue-500 hover:text-blue-700"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+            
             <div className="flex gap-2 items-end relative">
               <textarea
                 ref={textareaRef}
@@ -498,22 +549,46 @@ const ChatBox = ({
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
                 className="flex-1 px-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200"
-                placeholder="Type your message..."
+                placeholder={uploadedDocument ? "Describe what to extract from the document..." : "Type your message..."}
                 disabled={isLoading}
                 rows={3}
               />
-              <button
-                onClick={handleSend}
-                disabled={!message.trim() && !isLoading}
-                className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
-                title={isLoading ? "Stop generating" : "Send message"}
-              >
-                {isLoading ? (
-                  <Square size={18} className="fill-current animate-pulse" />
-                ) : (
-                  <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
-                )}
-              </button>
+              
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || uploadingDocument}
+                  className="p-2.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-300 text-gray-700 rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center"
+                  title="Upload document"
+                >
+                  {uploadingDocument ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <FileUp size={18} />
+                  )}
+                </button>
+                
+                <button
+                  onClick={handleSend}
+                  disabled={(!message.trim() && !uploadedDocument) || isLoading}
+                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
+                  title={isLoading ? "Stop generating" : "Send message"}
+                >
+                  {isLoading ? (
+                    <Square size={18} className="fill-current animate-pulse" />
+                  ) : (
+                    <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
+                  )}
+                </button>
+              </div>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileUpload}
+                accept="image/png,image/jpeg,image/jpg,application/pdf"
+                className="hidden"
+              />
             </div>
           </div>
         </>

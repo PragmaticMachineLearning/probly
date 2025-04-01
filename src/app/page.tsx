@@ -117,7 +117,7 @@ const SpreadsheetApp = () => {
     }
   };
 
-  const handleSend = async (message: string) => {
+  const handleSend = async (message: string, documentImage?: string) => {
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       text: message,
@@ -125,6 +125,9 @@ const SpreadsheetApp = () => {
       timestamp: new Date(),
       status: "pending",
       streaming: true,
+      // If an image was uploaded, store this info in the message
+      hasImage: !!documentImage,
+      documentImage: documentImage
     };
     setChatHistory((prev) => [...prev, newMessage]);
 
@@ -146,6 +149,7 @@ const SpreadsheetApp = () => {
           activeSheetName: activeSheetName,
           sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
+          documentImage: documentImage,
         }),
         signal: abortController.current.signal,
       });

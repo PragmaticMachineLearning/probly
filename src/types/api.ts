@@ -12,6 +12,8 @@ export interface ChatMessage {
     output: string;
     error?: string;
   };
+  hasImage?: boolean;
+  documentImage?: string;
 }
 
 export interface CellUpdate {
