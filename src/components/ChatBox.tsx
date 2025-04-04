@@ -47,6 +47,8 @@ const ChatBox = ({
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [uploadedDocumentName, setUploadedDocumentName] = useState<string | null>(null);
+  const [isImageFile, setIsImageFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Use external state if provided, otherwise use internal state
@@ -276,6 +278,9 @@ const ChatBox = ({
     try {
       setUploadingDocument(true);
       
+      // Check if the file is an image
+      setIsImageFile(file.type.startsWith('image/'));
+      
       // Convert the file to base64
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -285,6 +290,7 @@ const ChatBox = ({
       });
       
       setUploadedDocument(base64);
+      setUploadedDocumentName(file.name);
     } catch (error) {
       console.error("Error uploading document:", error);
     } finally {
@@ -298,6 +304,8 @@ const ChatBox = ({
 
   const handleRemoveDocument = () => {
     setUploadedDocument(null);
+    setUploadedDocumentName(null);
+    setIsImageFile(false);
   };
 
   return (
@@ -525,70 +533,87 @@ const ChatBox = ({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area */}
-          <div className="p-4 bg-white border-t border-gray-200">
-            {uploadedDocument && (
-              <div className="mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-blue-700">
-                  <FileUp size={16} />
-                  <span className="truncate">Document ready to send</span>
+          {/* Input Area with Document Preview */}
+          <div className="bg-white border-t border-gray-200">
+            {/* Document Preview Area - Always present but with height transition */}
+            <div className={`overflow-hidden transition-[height,opacity] duration-200 ease-in-out ${
+              uploadedDocument ? 'h-[84px] opacity-100' : 'h-0 opacity-0'
+            }`}>
+              {uploadedDocument && uploadedDocumentName && (
+                <div className="px-4 pt-3 border-b border-gray-100">
+                  {isImageFile && uploadedDocument && (
+                    <div className="relative w-[60px] h-[60px] group mb-3">
+                      <div className="rounded-lg overflow-hidden border border-gray-200 w-full h-full">
+                        <img 
+                          src={uploadedDocument} 
+                          alt="Document preview"
+                          className="w-full h-full object-contain bg-white"
+                        />
+                      </div>
+                      <button 
+                        onClick={handleRemoveDocument}
+                        className="absolute -top-2 -right-2 p-1.5 bg-gray-900/90 hover:bg-gray-900 rounded-full shadow-md text-white hover:text-white transition-colors opacity-0 group-hover:opacity-100 z-10"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <button 
-                  onClick={handleRemoveDocument}
-                  className="text-blue-500 hover:text-blue-700"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-            
-            <div className="flex gap-2 items-end relative">
-              <textarea
-                ref={textareaRef}
-                value={message}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200"
-                placeholder={uploadedDocument ? "Describe what to extract from the document..." : "Type your message..."}
-                disabled={isLoading}
-                rows={3}
-              />
-              
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isLoading || uploadingDocument}
-                  className="p-2.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-300 text-gray-700 rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center"
-                  title="Upload document"
-                >
-                  {uploadingDocument ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <FileUp size={18} />
-                  )}
-                </button>
+              )}
+            </div>
+
+            {/* Input Box Area */}
+            <div className="p-4">
+              <div className="flex gap-2 items-end relative">
+                <textarea
+                  ref={textareaRef}
+                  value={message}
+                  onChange={handleTextareaChange}
+                  onKeyDown={handleKeyDown}
+                  className={`flex-1 px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 ${
+                    uploadedDocument ? 'border-transparent' : 'border border-gray-200'
+                  }`}
+                  placeholder={uploadedDocument ? "What would you like to know about this document?" : "Type your message..."}
+                  disabled={isLoading}
+                  rows={3}
+                />
                 
-                <button
-                  onClick={handleSend}
-                  disabled={(!message.trim() && !uploadedDocument) || isLoading}
-                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
-                  title={isLoading ? "Stop generating" : "Send message"}
-                >
-                  {isLoading ? (
-                    <Square size={18} className="fill-current animate-pulse" />
-                  ) : (
-                    <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
-                  )}
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isLoading || uploadingDocument}
+                    className="p-2.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-300 text-gray-700 rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center"
+                    title="Upload document"
+                  >
+                    {uploadingDocument ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <FileUp size={18} />
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={handleSend}
+                    disabled={(!message.trim() && !uploadedDocument) || isLoading}
+                    className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
+                    title={isLoading ? "Stop generating" : "Send message"}
+                  >
+                    {isLoading ? (
+                      <Square size={18} className="fill-current animate-pulse" />
+                    ) : (
+                      <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
+                    )}
+                  </button>
+                </div>
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileUpload}
+                  accept="image/png,image/jpeg,image/jpg,application/pdf"
+                  className="hidden"
+                />
               </div>
-              
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={handleFileUpload}
-                accept="image/png,image/jpeg,image/jpg,application/pdf"
-                className="hidden"
-              />
             </div>
           </div>
         </>
