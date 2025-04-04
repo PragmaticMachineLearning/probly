@@ -426,6 +426,28 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     try {
       const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, documentImage } = req.body;
+      
+      // Check if document image is present and validate its size
+      if (documentImage) {
+        // Calculate base64 size (each character represents 6 bits, so 4 characters = 3 bytes)
+        const base64Size = Math.ceil((documentImage.length * 3) / 4);
+        const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+        
+        if (base64Size > maxSize) {
+          res.write(
+            `data: ${JSON.stringify({ 
+              error: "File size exceeds 10MB limit. Please compress your image or use a smaller file.",
+              details: {
+                fileSize: `${(base64Size / (1024 * 1024)).toFixed(2)}MB`,
+                maxSize: "10MB"
+              }
+            })}\n\n`
+          );
+          res.end();
+          return;
+        }
+      }
+
       // Race between the LLM request and the client disconnecting
       await Promise.race([
         handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res, documentImage),
@@ -443,3 +465,11 @@ export default async function handler(req: any, res: any): Promise<void> {
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 }
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb'  // Increased from default 1mb to handle larger document uploads
+    }
+  }
+};
