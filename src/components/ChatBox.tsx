@@ -49,8 +49,86 @@ const ChatBox = ({
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [uploadedDocumentName, setUploadedDocumentName] = useState<string | null>(null);
   const [isImageFile, setIsImageFile] = useState(false);
+  const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileDialogTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Add image compression constants
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+  const MAX_IMAGE_DIMENSION = 1200; // Maximum width/height for images
+  const COMPRESSION_QUALITY = 0.7; // 70% quality for JPEG compression
+
+  interface CompressedFile {
+    file: File;
+    wasCompressed: boolean;
+  }
+
+  // Add compression utility function
+  const compressImageFile = async (file: File): Promise<CompressedFile> => {
+    // If it's not an image or is under max size, return original
+    if (!file.type.startsWith('image/') || file.size <= MAX_FILE_SIZE) {
+      return { file, wasCompressed: false };
+    }
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let { width, height } = img;
+        
+        // Only resize if either dimension exceeds MAX_IMAGE_DIMENSION
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          const scale = Math.min(
+            MAX_IMAGE_DIMENSION / width,
+            MAX_IMAGE_DIMENSION / height
+          );
+          
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Draw and compress
+        ctx?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              resolve({ file, wasCompressed: false });
+              return;
+            }
+            
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            
+            resolve({
+              file: compressedFile,
+              wasCompressed: true
+            });
+          },
+          'image/jpeg',
+          COMPRESSION_QUALITY
+        );
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({ file, wasCompressed: false });
+      };
+      
+      img.src = url;
+    });
+  };
+
   // Use external state if provided, otherwise use internal state
   const promptLibraryOpen = externalIsPromptLibraryOpen !== undefined ? externalIsPromptLibraryOpen : showPromptLibrary;
   const setPromptLibraryOpen = externalSetIsPromptLibraryOpen || setShowPromptLibrary;
@@ -271,31 +349,114 @@ const ChatBox = ({
     }
   };
 
+  // Add this effect to handle ESC key for file dialog
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFileDialogOpen) {
+        // Reset the file dialog state
+        setIsFileDialogOpen(false);
+        
+        // Clear any existing timeout
+        if (fileDialogTimeoutRef.current) {
+          clearTimeout(fileDialogTimeoutRef.current);
+          fileDialogTimeoutRef.current = null;
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFileDialogOpen]);
+
+  // Update the file button click handler
+  const handleFileButtonClick = () => {
+    // Set state to indicate file dialog is opening
+    setIsFileDialogOpen(true);
+    
+    // Set a timeout to reset the state if no file is selected
+    // This handles the case when the user closes the dialog without selecting a file
+    fileDialogTimeoutRef.current = setTimeout(() => {
+      setIsFileDialogOpen(false);
+    }, 1000);
+    
+    // Use requestAnimationFrame to ensure UI updates before triggering file dialog
+    requestAnimationFrame(() => {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+    });
+  };
+
+  // Update the file upload handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Clear the timeout since a file was selected or dialog was closed
+    if (fileDialogTimeoutRef.current) {
+      clearTimeout(fileDialogTimeoutRef.current);
+      fileDialogTimeoutRef.current = null;
+    }
+    
+    // Reset the file dialog state
+    setIsFileDialogOpen(false);
+    
     const file = e.target.files?.[0];
     if (!file) return;
     
     try {
       setUploadingDocument(true);
       
-      // Check if the file is an image
-      setIsImageFile(file.type.startsWith('image/'));
+      // Check file size first
+      if (file.size > MAX_FILE_SIZE) {
+        if (!file.type.startsWith('image/')) {
+          throw new Error(`File size must be less than ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+        }
+        
+        // Try to compress if it's an image
+        const { file: processedFile, wasCompressed } = await compressImageFile(file);
+        
+        if (processedFile.size > MAX_FILE_SIZE) {
+          throw new Error(`Image too large even after compression. Please use a smaller image.`);
+        }
+        
+        if (wasCompressed) {
+          console.log(`Image compressed from ${file.size} to ${processedFile.size} bytes`);
+        }
+        
+        // Convert compressed file to base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(processedFile);
+        });
+        
+        setUploadedDocument(base64);
+        setUploadedDocumentName(file.name);
+        setIsImageFile(true);
+        
+      } else {
+        // Handle normal-sized files
+        setIsImageFile(file.type.startsWith('image/'));
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        
+        setUploadedDocument(base64);
+        setUploadedDocumentName(file.name);
+      }
       
-      // Convert the file to base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      
-      setUploadedDocument(base64);
-      setUploadedDocumentName(file.name);
     } catch (error) {
       console.error("Error uploading document:", error);
+      // Clear the uploaded document on error
+      setUploadedDocument(null);
+      setUploadedDocumentName(null);
+      setIsImageFile(false);
     } finally {
       setUploadingDocument(false);
-      // Reset the file input
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -564,56 +725,62 @@ const ChatBox = ({
 
             {/* Input Box Area */}
             <div className="p-4">
-              <div className="flex gap-2 items-end relative">
-                <textarea
-                  ref={textareaRef}
-                  value={message}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleKeyDown}
-                  className={`flex-1 px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 ${
-                    uploadedDocument ? 'border-transparent' : 'border border-gray-200'
-                  }`}
-                  placeholder={uploadedDocument ? "What would you like to know about this document?" : "Type your message..."}
-                  disabled={isLoading}
-                  rows={3}
-                />
+              {/* Textarea spanning full width */}
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={handleTextareaChange}
+                onKeyDown={handleKeyDown}
+                className={`w-full px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 mb-3 ${
+                  uploadedDocument ? 'border-transparent' : 'border border-gray-200'
+                }`}
+                placeholder={uploadedDocument ? "What would you like to know about this document?" : "Type your message..."}
+                disabled={isLoading}
+                rows={3}
+              />
+              
+              {/* Buttons row below textarea */}
+              <div className="flex justify-between items-center">
+                {/* File upload button on the left */}
+                <button
+                  onClick={handleFileButtonClick}
+                  disabled={isLoading || uploadingDocument}
+                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center shadow-md"
+                  title="Upload document"
+                >
+                  {uploadingDocument ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : isFileDialogOpen ? (
+                    <Loader2 size={12} className="animate-pulse" />
+                  ) : (
+                    <Plus size={12} />
+                  )}
+                </button>
                 
-                <div className="flex flex-col gap-2">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading || uploadingDocument}
-                    className="p-2.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-300 text-gray-700 rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center"
-                    title="Upload document"
-                  >
-                    {uploadingDocument ? (
-                      <Loader2 size={18} className="animate-spin" />
-                    ) : (
-                      <FileUp size={18} />
-                    )}
-                  </button>
-                  
-                  <button
-                    onClick={handleSend}
-                    disabled={(!message.trim() && !uploadedDocument) || isLoading}
-                    className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
-                    title={isLoading ? "Stop generating" : "Send message"}
-                  >
-                    {isLoading ? (
-                      <Square size={18} className="fill-current animate-pulse" />
-                    ) : (
-                      <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
-                    )}
-                  </button>
-                </div>
-                
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileUpload}
-                  accept="image/png,image/jpeg,image/jpg,application/pdf"
-                  className="hidden"
-                />
+                {/* Send button on the right */}
+                <button
+                  onClick={handleSend}
+                  disabled={(!message.trim() && !uploadedDocument) || isLoading}
+                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center group"
+                  title={isLoading ? "Stop generating" : "Send message"}
+                >
+                  {isLoading ? (
+                    <Square size={12} className="fill-current animate-pulse" />
+                  ) : (
+                    <Send size={12} className="group-hover:scale-110 transition-transform duration-200" />
+                  )}
+                </button>
               </div>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileUpload}
+                accept="image/png,image/jpeg,image/jpg,application/pdf"
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+              />
             </div>
           </div>
         </>
