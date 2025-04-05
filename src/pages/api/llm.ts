@@ -1,25 +1,24 @@
 import {
+ convertJsonToTableData,
  formatSpreadsheetData,
  generateCellUpdates,
  structureAnalysisOutput,
- convertJsonToTableData,
-
 } from "@/utils/analysisUtils";
 
 import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
+import { analyzeDocumentWithVision } from "@/utils/analysisUtils";
 import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
-
 
 dotenv.config();
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
-const model = "gpt-4o";
+const MODEL = "gpt-4o";
 
 async function handleLLMRequest(
   message: string,
@@ -73,61 +72,24 @@ async function handleLLMRequest(
       { role: "user", content: userMessageContent },
     ];
 
-    // First streaming call - always use standard model
-    const stream = await openai.chat.completions.create({
+    // Non-streaming call to OpenAI API
+    const completion = await openai.chat.completions.create({
       messages: messages as any,
-      model: model,
-      stream: true,
+      model: MODEL,
+      stream: false,
     });
 
-    let buffer = '';
-    const chunkSize = 100; // Characters
-
-    for await (const chunk of stream) {
-      if (aborted) {
-        console.log("Aborting stream processing");
-        await stream.controller.abort();
-        return;
-      }
-
-      const content = chunk.choices[0]?.delta?.content || "";
-      if (content) {
-        buffer += content;
-        
-        // Only send to client when buffer reaches a certain size
-        // This reduces the number of network packets
-        if (buffer.length >= chunkSize) {
-          res.write(
-            `data: ${JSON.stringify({
-              response: buffer,
-              streaming: true,
-            })}\n\n`,
-          );
-          buffer = '';
-        }
-      }
-    }
-
-    // Send any remaining buffer
-    if (buffer.length > 0) {
-      res.write(
-        `data: ${JSON.stringify({
-          response: buffer,
-          streaming: true,
-        })}\n\n`,
-      );
-    }
-
-    // Check again before making the tool call
     if (aborted) return;
 
+    const response = completion.choices[0]?.message?.content || "";
+    
     // Tool completion call - always use standard model
     const toolCompletion = await openai.chat.completions.create({
       messages: [
         ...messages,
-        { role: "assistant", content: buffer },
+        { role: "assistant", content: response },
       ],
-      model: model,
+      model: MODEL,
       tools: tools as any,
       stream: false,
     });
@@ -141,7 +103,7 @@ async function handleLLMRequest(
     if (toolCalls?.length) {
       const toolCall = toolCalls[0];
       let toolData: any = {
-        response: buffer,
+        response: response,
       };
 
       if (toolCall.function.name === "set_spreadsheet_cells") {
@@ -172,10 +134,7 @@ async function handleLLMRequest(
           const { analysis_goal, suggested_code, start_cell } = JSON.parse(
             toolCall.function.arguments,
           );    
-          console.log("SUGGESTED CODE >>>", suggested_code);
-          console.log("START CELL >>>", start_cell);
-          console.log("ANALYSIS GOAL >>>", analysis_goal);
-
+      
           if (aborted) {
             await sandbox.destroy();
             return;
@@ -191,7 +150,6 @@ async function handleLLMRequest(
 
           // Structure the output using LLM
           const structuredOutput = await structureAnalysisOutput(result.stdout, analysis_goal);
-          console.log("STRUCTURED OUTPUT >>>", structuredOutput);
           
           // Generate cell updates from structured output
           const generatedUpdates = generateCellUpdates(structuredOutput, start_cell);
@@ -275,9 +233,6 @@ async function handleLLMRequest(
         
         const args = JSON.parse(toolCall.function.arguments);
         const { operation, target_sheet, start_cell } = args;
-        console.log("OPERATION >>>", operation);
-        console.log("TARGET SHEET >>>", target_sheet);
-        console.log("START CELL >>>", start_cell);
         
         // We need the document image for analysis
         if (!documentImage) {
@@ -285,25 +240,7 @@ async function handleLLMRequest(
         } else {
           try {
             // Make a second call to the OpenAI Vision API to analyze the document
-            const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
-            Format the output as a structured JSON object that can be used to populate a spreadsheet.
-            If extracting a table, create an array of objects with consistent keys.
-            Include metadata about the document if relevant (e.g., date, total amount, etc.).`;
-            
-            const visionResponse = await openai.chat.completions.create({
-              model: "gpt-4o",
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: visionPrompt },
-                    { type: "image_url", image_url: { url: documentImage } }
-                  ]
-                }
-              ],
-              max_tokens: 1500
-            });
-            
+            const visionResponse = await analyzeDocumentWithVision(operation, documentImage);
             const visionResult = visionResponse.choices[0]?.message?.content || "{}";
             console.log("VISION RESULT >>>", visionResult);
             
@@ -390,7 +327,7 @@ async function handleLLMRequest(
     } else if (!aborted) {
       res.write(
         `data: ${JSON.stringify({
-          response: buffer,
+          response: response,
           streaming: false,
         })}\n\n`,
       );

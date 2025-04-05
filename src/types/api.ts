@@ -3,9 +3,8 @@ export interface ChatMessage {
   text: string;
   response: string;
   timestamp: Date;
-  status: "pending" | "accepted" | "rejected" | null;
+  status: "pending" | "accepted" | "rejected" | "completed" | null;
   updates?: CellUpdate[];
-  streaming?: boolean;
   chartData?: any;
   analysis?: {
     goal: string;

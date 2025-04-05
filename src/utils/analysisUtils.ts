@@ -178,7 +178,7 @@ Guidelines:
       messages: [
         { role: "user", content: prompt }
       ],
-      temperature: 0.2,
+      temperature: 0.1,
       response_format: { type: "json_object" }
     });
 
@@ -202,3 +202,25 @@ Guidelines:
     };
   }
 } 
+
+export const analyzeDocumentWithVision = async (operation: string, documentImage: string, model: string = "gpt-4o") => {
+  const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
+  Format the output as a structured JSON object that can be used to populate a spreadsheet.
+  If extracting a table, create an array of objects with consistent keys.
+  Include metadata about the document if relevant (e.g., date, total amount, etc.).`;
+  
+  return await openai.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: "user", 
+        content: [
+          { type: "text", text: visionPrompt },
+          { type: "image_url", image_url: { url: documentImage } }
+        ]
+      }
+    ],
+    temperature: 0.1,
+    max_tokens: 1500
+  });
+};

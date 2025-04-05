@@ -603,7 +603,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
                     onChange={handleSheetNameChange}
                     onBlur={handleSheetNameBlur}
                     autoFocus
-                    className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded"
+                    className="w-24 px-1 py-0.5 text-sm border border-[#1A6B4C] rounded"
                     onClick={e => e.stopPropagation()}
                   />
                 </form>
@@ -656,7 +656,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
             </div>
           ))}
           <button 
-            className="flex items-center px-3 py-1.5 text-sm text-blue-600 hover:bg-gray-100 rounded-md mt-1"
+            className="flex items-center px-3 py-1.5 text-sm text-[#1A6B4C] hover:bg-gray-100 rounded-md mt-1"
             onClick={handleAddSheet}
             title="Add new sheet"
           >

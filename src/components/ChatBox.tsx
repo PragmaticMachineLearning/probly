@@ -171,7 +171,7 @@ const ChatBox = ({
   useEffect(() => {
     if (chatHistory.length > 0) {
       const lastMessage = chatHistory[chatHistory.length - 1];
-      setIsLoading(!!lastMessage.streaming);
+      setIsLoading(lastMessage.status === "pending");
     }
   }, [chatHistory]);
 
@@ -217,21 +217,26 @@ const ChatBox = ({
   }, [promptLibraryOpen, setPromptLibraryOpen, externalIsPromptLibraryOpen]);
 
   const handleSend = async () => {
-    if (message.trim() || isLoading) {
+    if (message.trim() || uploadedDocument || isLoading) {
       if (isLoading) {
         onStop();
-        setIsLoading(false);
         return;
       }
       const messageToSend = message;
+      const documentToSend = uploadedDocument;
+      
+      // Clear message and document preview immediately
       setMessage("");
+      setUploadedDocument(null);
+      setUploadedDocumentName(null);
+      setIsImageFile(false);
+      
       setIsLoading(true);
       try {
-        await onSend(messageToSend, uploadedDocument || undefined);
-        // Clear the uploaded document after sending
-        setUploadedDocument(null);
+        await onSend(messageToSend, documentToSend || undefined);
       } catch (error) {
         console.error("Error details:", error);
+        setIsLoading(false);
       }
     }
   };
@@ -455,6 +460,7 @@ const ChatBox = ({
       setUploadedDocument(null);
       setUploadedDocumentName(null);
       setIsImageFile(false);
+        console.log("Document cleared:", uploadedDocument);
     } finally {
       setUploadingDocument(false);
       if (fileInputRef.current) {
@@ -467,7 +473,21 @@ const ChatBox = ({
     setUploadedDocument(null);
     setUploadedDocumentName(null);
     setIsImageFile(false);
+        console.log("Document cleared:", uploadedDocument);
   };
+
+  // Add this useEffect to clear document when a new message is added
+  useEffect(() => {
+    if (chatHistory.length > 0) {
+      const lastMessage = chatHistory[chatHistory.length - 1];
+      // If this is a new message (not pending) and it has an image, clear the document
+      if (lastMessage.status !== "pending" && lastMessage.hasImage) {
+        setUploadedDocument(null);
+        setUploadedDocumentName(null);
+        setIsImageFile(false);
+      }
+    }
+  }, [chatHistory]);
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
@@ -482,7 +502,7 @@ const ChatBox = ({
         <div className="flex gap-2">
           <button
             onClick={togglePromptLibrary}
-            className={`p-2 ${promptLibraryOpen ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:text-blue-500 hover:bg-blue-50'} rounded-full transition-all duration-200`}
+            className={`p-2 ${promptLibraryOpen ? 'text-[#1A6B4C] bg-[#1A6B4C]/10' : 'text-gray-500 hover:text-[#1A6B4C] hover:bg-[#1A6B4C]/10'} rounded-full transition-all duration-200`}
             title={promptLibraryOpen ? "Back to chat (Ctrl+Shift+L)" : "Open prompt library (Ctrl+Shift+L)"}
           >
             <BookOpen size={18} />
@@ -513,7 +533,7 @@ const ChatBox = ({
                   placeholder="Search prompts..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C]"
                 />
               </div>
               <button
@@ -527,16 +547,16 @@ const ChatBox = ({
                     setNewPromptContent('');
                   }
                 }}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+                className="p-2 bg-[#1A6B4C] text-white rounded-full hover:bg-[#1A6B4C]/80 transition-all duration-200 flex items-center justify-center"
+                title={isAddingPrompt && !editingPromptId ? "Cancel" : "Add Prompt"}
               >
                 {isAddingPrompt && !editingPromptId ? <X size={18} /> : <Plus size={18} />}
-                {isAddingPrompt && !editingPromptId ? 'Cancel' : 'Add Prompt'}
               </button>
             </div>
             
             {/* Add/Edit Prompt Form */}
             {isAddingPrompt && (
-              <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+              <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-[#1A6B4C]/5">
                 <div className="mb-3">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Title</label>
                   <input
@@ -544,7 +564,7 @@ const ChatBox = ({
                     value={newPromptTitle}
                     onChange={(e) => setNewPromptTitle(e.target.value)}
                     placeholder="Enter a descriptive title"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C]"
                   />
                 </div>
                 <div className="mb-3">
@@ -554,25 +574,25 @@ const ChatBox = ({
                     onChange={(e) => setNewPromptContent(e.target.value)}
                     placeholder="Enter your prompt template..."
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C] resize-none"
                   />
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleSavePrompt}
                     disabled={!newPromptTitle.trim() || !newPromptContent.trim()}
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    className="p-2 bg-[#1A6B4C] text-white rounded-full hover:bg-[#1A6B4C]/80 transition-all duration-200 flex items-center justify-center disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    title={editingPromptId ? "Update Prompt" : "Save Prompt"}
                   >
                     <Save size={18} />
-                    {editingPromptId ? 'Update Prompt' : 'Save Prompt'}
                   </button>
                   {editingPromptId && (
                     <button
                       onClick={handleCancelEdit}
-                      className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-2"
+                      className="p-2 bg-gray-500 text-white rounded-full hover:bg-gray-600 transition-all duration-200 flex items-center justify-center"
+                      title="Cancel"
                     >
                       <X size={18} />
-                      Cancel
                     </button>
                   )}
                 </div>
@@ -591,16 +611,17 @@ const ChatBox = ({
                 {filteredPrompts.map((prompt) => (
                   <div 
                     key={prompt.id}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer group"
+                    className="border border-gray-200 rounded-lg p-4 hover:border-[#1A6B4C] hover:bg-[#1A6B4C]/5 transition-all duration-200 cursor-pointer group"
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h3 className="font-medium text-gray-800">{prompt.title}</h3>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleSelectPrompt(prompt.content)}
-                          className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+                          className="p-1.5 text-[#1A6B4C] hover:text-[#1A6B4C]/80 hover:bg-[#1A6B4C]/10 rounded-full transition-all duration-200"
+                          title="Use Prompt"
                         >
-                          Use
+                          <Check size={16} />
                         </button>
                         {!predefinedPrompts.some(p => p.id === prompt.id) && (
                           <>
@@ -609,7 +630,8 @@ const ChatBox = ({
                                 e.stopPropagation();
                                 handleEditPrompt(prompt);
                               }}
-                              className="text-gray-500 hover:text-gray-700 transition-colors"
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all duration-200"
+                              title="Edit Prompt"
                             >
                               <Edit2 size={16} />
                             </button>
@@ -618,7 +640,8 @@ const ChatBox = ({
                                 e.stopPropagation();
                                 handleDeletePrompt(prompt.id);
                               }}
-                              className="text-red-500 hover:text-red-700 transition-colors"
+                              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full transition-all duration-200"
+                              title="Delete Prompt"
                             >
                               <Trash2 size={16} />
                             </button>
@@ -649,11 +672,31 @@ const ChatBox = ({
                 <div key={chat.id} className="space-y-3 animate-fadeIn">
                   {/* User Message */}
                   <div className="flex justify-end">
-                    <div className="bg-blue-500 text-white rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-shadow duration-200">
-                      <p className="text-sm break-words">{chat.text}</p>
-                      <span className="text-xs opacity-75 mt-1 block">
-                        {new Date(chat.timestamp).toLocaleTimeString()}
-                      </span>
+                    <div className="flex flex-col items-end gap-2">
+                      {/* Document Preview above message */}
+                      {chat.hasImage && chat.documentImage && (
+                        <div className="w-32 h-32 rounded-lg overflow-hidden shadow-md bg-white border border-gray-200">
+                          {chat.documentImage.startsWith('data:image/') ? (
+                            <img 
+                              src={chat.documentImage} 
+                              alt="Document preview"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                              <FileUp size={24} className="text-gray-500" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Message Bubble */}
+                      <div className="bg-[#1A6B4C] text-white rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-shadow duration-200">
+                        <p className="text-sm break-words">{chat.text}</p>
+                        <span className="text-xs opacity-75 mt-1 block">
+                          {new Date(chat.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -661,27 +704,15 @@ const ChatBox = ({
                   <div className="flex justify-start">
                     <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200">
                       <div className="text-sm text-gray-800 break-words">
-                        {chat.streaming ? (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-gray-500">
-                              <Loader2 size={14} className="animate-spin" />
-                              <span className="text-xs">AI is generating response...</span>
-                            </div>
-                            <div className="border-l-2 border-blue-200 pl-3 font-mono">
-                              {chat.response}
-                            </div>
-                          </div>
-                        ) : (
-                          <ToolResponse
-                            response={chat.response}
-                            updates={chat.updates}
-                            chartData={chat.chartData}
-                            analysis={chat.analysis}
-                            status={chat.status}
-                            onAccept={() => onAccept(chat.updates || [], chat.id)}
-                            onReject={() => onReject(chat.id)}
-                          />
-                        )}
+                        <ToolResponse
+                          response={chat.response}
+                          updates={chat.updates}
+                          chartData={chat.chartData}
+                          analysis={chat.analysis}
+                          status={chat.status}
+                          onAccept={() => onAccept(chat.updates || [], chat.id)}
+                          onReject={() => onReject(chat.id)}
+                        />
                       </div>
                       <span className="text-xs text-gray-400 mt-1 block">
                         {new Date(chat.timestamp).toLocaleTimeString()}
@@ -731,7 +762,7 @@ const ChatBox = ({
                 value={message}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                className={`w-full px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 mb-3 ${
+                className={`w-full px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1A6B4C] focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 mb-3 ${
                   uploadedDocument ? 'border-transparent' : 'border border-gray-200'
                 }`}
                 placeholder={uploadedDocument ? "What would you like to know about this document?" : "Type your message..."}
@@ -745,7 +776,7 @@ const ChatBox = ({
                 <button
                   onClick={handleFileButtonClick}
                   disabled={isLoading || uploadingDocument}
-                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center shadow-md"
+                  className="p-2.5 bg-[#1A6B4C] hover:bg-[#1A6B4C]/80 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center shadow-md"
                   title="Upload document"
                 >
                   {uploadingDocument ? (
@@ -760,8 +791,8 @@ const ChatBox = ({
                 {/* Send button on the right */}
                 <button
                   onClick={handleSend}
-                  disabled={(!message.trim() && !uploadedDocument) || isLoading}
-                  className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center group"
+                  disabled={(!message.trim() && !uploadedDocument) && !isLoading}
+                  className="p-2.5 bg-[#1A6B4C] hover:bg-[#1A6B4C]/80 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center group"
                   title={isLoading ? "Stop generating" : "Send message"}
                 >
                   {isLoading ? (
@@ -771,6 +802,7 @@ const ChatBox = ({
                   )}
                 </button>
               </div>
+              
               
               <input
                 ref={fileInputRef}
