@@ -132,84 +132,33 @@ export function generateCellUpdates(structuredOutput: string, startCell: string)
   );
 }
 
-/**
- * Converts complex JSON to tabular data suitable for spreadsheet display
- * @param jsonData - Any JSON data structure to convert
- * @param operationType - The type of operation used to extract the data
- * @returns Promise<TableConversionResult> - Structured table data with headers and rows
- */
-export async function convertJsonToTableData(
-  jsonData: any,
-  operationType: string
-): Promise<TableConversionResult> {
-  try {
-    const jsonString = JSON.stringify(jsonData, null, 2);
-    
-    const prompt = `
-Convert the following JSON data to a table format optimized for a spreadsheet. 
-The data was extracted from a document using the "${operationType}" operation.
 
-JSON DATA:
-${jsonString}
 
-Output a JSON object with exactly this structure:
-{
-  "headers": ["Column1", "Column2", ...],
-  "rows": [
-    ["row1col1", "row1col2", ...],
-    ["row2col1", "row2col2", ...],
-    ...
-  ],
-  "note": "Optional explanation about the data structure"
-}
-
-Guidelines:
-1. If the JSON has a simple key-value structure, make the keys one column and values another
-2. If the JSON has arrays of objects, extract all unique keys as columns
-3. For nested objects, flatten them appropriately or create multiple tables if necessary
-4. Ensure consistent data types in each column
-5. Include meaningful headers that describe the data
-6. Don't include more than 20 columns maximum
-7. Your response must be valid JSON that can be parsed with JSON.parse()
-`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.1,
-      response_format: { type: "json_object" }
-    });
-
-    const content = response.choices[0]?.message?.content || "{}";
-    
-    // Parse the response - it should be a valid JSON object
-    const tableData = JSON.parse(content) as TableConversionResult;
-    
-    // Validate the structure
-    if (!tableData.headers || !tableData.rows) {
-      throw new Error("Invalid table structure returned from LLM");
-    }
-    
-    return tableData;
-  } catch (error: any) {
-    console.error("Error converting JSON to table data:", error);
-    // Return a simple fallback structure with the error
-    return {
-      headers: ["Key", "Value"],
-      rows: [["Error", `Failed to convert JSON: ${error.message}`]]
-    };
-  }
-} 
-
-export const analyzeDocumentWithVision = async (operation: string, documentImage: string, model: string = "gpt-4o") => {
+export const analyzeDocumentWithVision = async (operation: string, documentImage: string, model: string = "gpt-4o"): Promise<TableConversionResult> => {
   const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
-  Format the output as a structured JSON object that can be used to populate a spreadsheet.
-  If extracting a table, create an array of objects with consistent keys.
-  Include metadata about the document if relevant (e.g., date, total amount, etc.).`;
+  Format the output as a structured table with headers and rows that can be directly inserted into a spreadsheet.
   
-  return await openai.chat.completions.create({
+  Return a JSON object with exactly this structure:
+  {
+    "headers": ["Column1", "Column2", ...],
+    "rows": [
+      ["row1col1", "row1col2", ...],
+      ["row2col1", "row2col2", ...],
+      ...
+    ],
+    "note": "Optional explanation about the data structure"
+  }
+
+  Guidelines:
+  1. If the document contains a table, extract it directly with proper headers
+  2. If the document contains key-value pairs, make the keys one column and values another
+  3. If the document contains lists or arrays, create appropriate columns
+  4. Ensure consistent data types in each column
+  5. Include meaningful headers that describe the data
+  6. Don't include more than 20 columns maximum
+  7. Your response must be valid JSON that can be parsed with JSON.parse()`;
+  
+  const response = await openai.chat.completions.create({
     model: model,
     messages: [
       {
@@ -221,6 +170,27 @@ export const analyzeDocumentWithVision = async (operation: string, documentImage
       }
     ],
     temperature: 0.1,
-    max_tokens: 1500
+    max_tokens: 1500,
+    response_format: { type: "json_object" }
   });
+
+  const content = response.choices[0]?.message?.content || "{}";
+  
+  try {
+    const tableData = JSON.parse(content) as TableConversionResult;
+    
+    // Validate the structure
+    if (!tableData.headers || !tableData.rows) {
+      throw new Error("Invalid table structure returned from LLM");
+    }
+    
+    return tableData;
+  } catch (error: any) {
+    console.error("Error parsing vision API response:", error);
+    // Return a simple fallback structure with the error
+    return {
+      headers: ["Error"],
+      rows: [["Failed to process document: " + error.message]]
+    };
+  }
 };

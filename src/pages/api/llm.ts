@@ -1,8 +1,7 @@
 import {
- convertJsonToTableData,
- formatSpreadsheetData,
- generateCellUpdates,
- structureAnalysisOutput,
+formatSpreadsheetData,
+generateCellUpdates,
+structureAnalysisOutput,
 } from "@/utils/analysisUtils";
 
 import { OpenAI } from "openai";
@@ -239,35 +238,8 @@ async function handleLLMRequest(
           toolData.response = "Error: No document image provided for analysis.";
         } else {
           try {
-            // Make a second call to the OpenAI Vision API to analyze the document
-            const visionResponse = await analyzeDocumentWithVision(operation, documentImage);
-            const visionResult = visionResponse.choices[0]?.message?.content || "{}";
-            console.log("VISION RESULT >>>", visionResult);
-            
-            // Try to parse the result as JSON
-            let extractedData;
-            try {
-              // Check if the result is wrapped in a code block with backticks
-              let jsonText = visionResult;
-              
-              // Handle ```json code blocks - use [\s\S]* instead of .* with s flag
-              const jsonBlockMatch = visionResult.match(/```(?:json)?\s*([\s\S]+?)```/);
-              if (jsonBlockMatch && jsonBlockMatch[1]) {
-                jsonText = jsonBlockMatch[1];
-              }
-              
-              // Clean any remaining whitespace
-              jsonText = jsonText.trim();
-              
-              extractedData = JSON.parse(jsonText);
-            } catch (e: any) {
-              // If the result is not valid JSON, use text processing to extract structured data
-              console.log("Error parsing JSON from vision API, using raw text instead:", e);
-              extractedData = { text: visionResult };
-            }
-            
-            // Use LLM to convert the JSON to tabular format
-            const tableData = await convertJsonToTableData(extractedData, operation);
+            // Get table data directly from vision API
+            const tableData = await analyzeDocumentWithVision(operation, documentImage);
             
             // Generate cell updates based on the table data
             const updates: Array<{target: string, formula: string, sheetName: string}> = [];
@@ -306,7 +278,7 @@ async function handleLLMRequest(
             // Add metadata about the extraction for display purposes
             toolData.analysis = {
               goal: `Document ${operation.replace('_', ' ')}`,
-              output: visionResult,
+              output: JSON.stringify(tableData, null, 2),
             };
           } catch (error: any) {
             console.error("Error processing document:", error);
