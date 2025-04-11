@@ -7,11 +7,7 @@ interface ToolResponseProps {
   response: string;
   updates?: CellUpdate[];
   chartData?: any;
-  analysis?: {
-    goal: string;
-    output: string;
-    error?: string;
-  };
+  
   status: 'pending' | 'accepted' | 'rejected' | 'completed' | null;
   onAccept: () => void;
   onReject: () => void;
@@ -41,7 +37,7 @@ const ToolResponse: React.FC<ToolResponseProps> = ({
   // Function to create a mini spreadsheet visualization
   const renderMiniSpreadsheet = (updates: CellUpdate[], expanded: boolean, setExpanded: (expanded: boolean) => void) => {
     if (!updates || updates.length === 0) return null;
-    
+    console.log("UPDATES IN TOOL RESPONSE >>>", updates);
     // Extract column and row information from cell references
     const cellInfo = updates.map(update => {
       const match = update.target.match(/([A-Z]+)(\d+)/);
@@ -90,6 +86,11 @@ const ToolResponse: React.FC<ToolResponseProps> = ({
         {/* Update summary */}
         <div className="text-xs text-gray-600 mb-2">
           <span className="font-medium">{updates.length}</span> cells updated in range <span className="font-mono">{rangeSummary}</span>
+          {!expanded && (
+            <span className="text-gray-500">
+              {` (+${maxRow - displayMaxRow} more rows, +${uniqueCols.length - colsToShow.length} more columns)`}
+            </span>
+          )}
         </div>
         
         <div className="overflow-x-auto max-w-full">

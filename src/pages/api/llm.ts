@@ -8,6 +8,7 @@ import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
 import { analyzeDocumentWithVision } from "@/utils/analysisUtils";
+import { convertTableToCellUpdates } from "@/utils/analysisUtils";
 import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
@@ -159,11 +160,6 @@ async function handleLLMRequest(
           toolData = {
             response: responseMessage,
             updates: generatedUpdates.flat(), // Flatten the updates array
-            analysis: {
-              goal: analysis_goal,
-              output: structuredOutput,
-              error: result.stderr,
-            },
           };
         } catch (error) {
           console.error("Error executing Python code:", error);
@@ -241,45 +237,17 @@ async function handleLLMRequest(
             // Get table data directly from vision API
             const tableData = await analyzeDocumentWithVision(operation, documentImage);
             
-            // Generate cell updates based on the table data
-            const updates: Array<{target: string, formula: string, sheetName: string}> = [];
-            
-            if (start_cell) {
-              const col = start_cell[0].toUpperCase();
-              const rowNum = parseInt(start_cell.substring(1));
-              
-              // Add headers
-              tableData.headers.forEach((header, index) => {
-                updates.push({
-                  target: `${String.fromCharCode(col.charCodeAt(0) + index)}${rowNum}`,
-                  formula: header,
-                  sheetName: target_sheet || activeSheetName
-                });
-              });
-              
-              // Add data rows
-              tableData.rows.forEach((row, rowIndex) => {
-                row.forEach((cell, colIndex) => {
-                  updates.push({
-                    target: `${String.fromCharCode(col.charCodeAt(0) + colIndex)}${rowNum + rowIndex + 1}`,
-                    formula: cell,
-                    sheetName: target_sheet || activeSheetName
-                  });
-                });
-              });
-            }
-            
-            toolData.updates = updates;
+            // Generate cell updates using the standardized function
+            const updates = convertTableToCellUpdates(tableData, start_cell, target_sheet || activeSheetName);
             
             // Include note from table conversion if available
             const noteText = tableData.note ? `\n\nNote: ${tableData.note}` : '';
-            toolData.response = `Successfully extracted data using ${operation.replace('_', ' ')}. The data has been placed in your spreadsheet${start_cell ? ` starting at cell ${start_cell}` : ''}.${noteText}`;
-            
-            // Add metadata about the extraction for display purposes
-            toolData.analysis = {
-              goal: `Document ${operation.replace('_', ' ')}`,
-              output: JSON.stringify(tableData, null, 2),
-            };
+           
+            toolData = {
+              response: `Successfully extracted data using ${operation.replace('_', ' ')}. The data has been placed in your spreadsheet${start_cell ? ` starting at cell ${start_cell}` : ''}.${noteText}`,
+              updates: updates,
+            }
+          
           } catch (error: any) {
             console.error("Error processing document:", error);
             toolData.response = `Error processing document: ${error.message || "Unknown error"}`;

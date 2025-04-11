@@ -65,6 +65,27 @@ export function formatSpreadsheetData(data: any[][]): string {
 }
 
 /**
+ * Parses structured output into cell updates
+ * @param structuredOutput - The CSV-like structured output
+ * @param startCell - Starting cell reference (e.g. 'A1')
+ * @returns Array of cell updates
+ */
+export function generateCellUpdates(structuredOutput: string, startCell: string) {
+  const outputRows = structuredOutput.trim().split('\n')
+    .map(row => row.split(',').map(cell => cell.trim()));
+  
+  const colLetter = startCell.match(/[A-Z]+/)?.[0] || 'A';
+  const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1');
+
+  return outputRows.map((row, rowIndex) => 
+    row.map((value, colIndex) => ({
+      target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex}`,
+      formula: value.toString()
+    }))
+  );
+}
+
+/**
  * Structures raw analysis output into a clean tabular format using LLM
  * @param rawOutput - The raw output from Python analysis
  * @param analysisGoal - The goal/context of the analysis
@@ -112,28 +133,54 @@ export async function structureAnalysisOutput(rawOutput: string, analysisGoal: s
 }
 
 /**
- * Parses structured output into cell updates
- * @param structuredOutput - The CSV-like structured output
+ * Converts table data into standardized cell updates
+ * @param tableData - The table data to convert
  * @param startCell - Starting cell reference (e.g. 'A1')
+ * @param sheetName - Optional sheet name for the updates
  * @returns Array of cell updates
  */
-export function generateCellUpdates(structuredOutput: string, startCell: string) {
-  const outputRows = structuredOutput.trim().split('\n')
-    .map(row => row.split(',').map(cell => cell.trim()));
+export function convertTableToCellUpdates(
+  tableData: { headers: string[]; rows: string[][] },
+  startCell: string,
+  sheetName?: string
+): Array<{target: string, formula: string, sheetName?: string}> {
+  const updates: Array<{target: string, formula: string, sheetName?: string}> = [];
+  
+  if (!tableData.headers || !tableData.rows) return updates;
   
   const colLetter = startCell.match(/[A-Z]+/)?.[0] || 'A';
   const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1');
-
-  return outputRows.map((row, rowIndex) => 
-    row.map((value, colIndex) => ({
-      target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex}`,
-      formula: value.toString()
-    }))
-  );
+  
+  // Add headers
+  tableData.headers.forEach((header, index) => {
+    updates.push({
+      target: `${String.fromCharCode(colLetter.charCodeAt(0) + index)}${rowNumber}`,
+      formula: header,
+      sheetName
+    });
+  });
+  
+  // Add data rows
+  tableData.rows.forEach((row, rowIndex) => {
+    row.forEach((cell, colIndex) => {
+      updates.push({
+        target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex + 1}`,
+        formula: cell,
+        sheetName
+      });
+    });
+  });
+  
+  return updates;
 }
 
-
-
+/**
+ * Analyzes a document with Vision API and returns a structured table
+ * @param operation - The operation to perform on the document
+ * @param documentImage - The image of the document
+ * @param model - The model to use for the analysis
+ * @returns Promise<TableConversionResult> - Structured table with headers and rows
+ */
 export const analyzeDocumentWithVision = async (operation: string, documentImage: string, model: string = "gpt-4o"): Promise<TableConversionResult> => {
   const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
   Format the output as a structured table with headers and rows that can be directly inserted into a spreadsheet.

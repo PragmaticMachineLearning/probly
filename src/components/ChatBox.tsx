@@ -708,7 +708,6 @@ const ChatBox = ({
                           response={chat.response}
                           updates={chat.updates}
                           chartData={chat.chartData}
-                          analysis={chat.analysis}
                           status={chat.status}
                           onAccept={() => onAccept(chat.updates || [], chat.id)}
                           onReject={() => onReject(chat.id)}
