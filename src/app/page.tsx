@@ -340,16 +340,6 @@ const SpreadsheetApp = () => {
     localStorage.removeItem("chatHistory");
   };
 
-  const handleDataChange = (data: any[][]) => {
-    // We don't need to store this data in state anymore
-    // If needed, we can get it from the spreadsheet context
-  };
-
-  const handleSelectPrompt = (promptText: string) => {
-    setMessage(promptText);
-    setIsPromptLibraryOpen(false);
-    setIsChatOpen(true);
-  };
 
   return (
     <main className="h-screen w-screen flex flex-col bg-gray-50">

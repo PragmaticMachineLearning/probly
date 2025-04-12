@@ -1,50 +1,27 @@
 <div align="center">
-  <img src="LOGO.png" alt="Probly Logo" width="400"/>
+  <img src="docs/docs/assets/images/Logo.png" alt="Probly Logo" width="400"/>
 
   # Probly
-  ### AI-Powered Spreadsheet Analysis Made Simple 🚀
+  ### Data analysis with spreadsheets made simple
 
-  [![Discord](https://img.shields.io/discord/YOUR_DISCORD_ID?color=7289DA&label=Discord&logo=discord&logoColor=white)](https://discord.gg/S273ycM6zW)
+  [![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?logo=discord&logoColor=white)](https://discord.gg/S273ycM6zW)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
 
-## 🌟 What is Probly?
+## What is Probly?
 
-Probly is a next-generation spreadsheet application that combines the power of traditional spreadsheets with AI-driven analysis, Python computation, and intelligent document processing. Think of it as your personal data analysis assistant! 🤖
+Probly is a next-generation spreadsheet application that combines the power of traditional spreadsheets with AI-driven analysis, Python computation, and intelligent document processing.
 
-## ✨ Key Features
+## Key Features
 
-### 📊 Smart Spreadsheet
-- Full-featured spreadsheet with formula support
-- Real-time collaboration capabilities
-- Intelligent cell suggestions and auto-completion
+- **Smart Spreadsheet**: Full-featured spreadsheet with formula support and intelligent cell suggestions
+- **Python Integration**: Run Python code directly in your browser using WebAssembly
+- **Data Visualization**: Create interactive charts and visualizations
+- **AI-Powered Analysis**: Get intelligent insights and automated trend analysis
+- **Document Processing**: Extract and process data from images.
+- **Prompt Library**: Access predefined analysis templates and save custom prompts
 
-### 🐍 Python Integration
-- Run Python code directly in your browser using WebAssembly
-- No server-side execution needed - everything runs locally
-- Perfect for data analysis and manipulation
-
-### 📈 Data Visualization
-- Create beautiful charts and visualizations
-- Interactive plotting capabilities
-- Multiple chart types supported
-
-### 🤖 AI-Powered Analysis
-- Get intelligent insights about your data
-- Automated trend analysis and predictions
-- Natural language queries for data exploration
-
-### 📚 Prompt Library
-- Access predefined analysis templates
-- Save and manage your custom prompts
-- Quick access to common operations
-
-### 📄 Document Processing
-- Extract data from images and PDFs using AI
-- Automatic table detection and data extraction
-- Smart data placement in spreadsheets
-- Support for various document types
-- Handles files up to 10MB
+![Probly Spreadsheet Example](/docs/docs/assets/images/probly02.png)
 
 ## 🏗️ Architecture
 
