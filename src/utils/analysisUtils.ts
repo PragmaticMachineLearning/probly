@@ -5,6 +5,13 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
+// Interface for table conversion response
+export interface TableConversionResult {
+  headers: string[];
+  rows: string[][];
+  note?: string;
+}
+
 /**
  * Formats 2D array data into a structured XML-like string representation
  * @param data - 2D array of spreadsheet data
@@ -58,6 +65,27 @@ export function formatSpreadsheetData(data: any[][]): string {
 }
 
 /**
+ * Parses structured output into cell updates
+ * @param structuredOutput - The CSV-like structured output
+ * @param startCell - Starting cell reference (e.g. 'A1')
+ * @returns Array of cell updates
+ */
+export function generateCellUpdates(structuredOutput: string, startCell: string) {
+  const outputRows = structuredOutput.trim().split('\n')
+    .map(row => row.split(',').map(cell => cell.trim()));
+  
+  const colLetter = startCell.match(/[A-Z]+/)?.[0] || 'A';
+  const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1');
+
+  return outputRows.map((row, rowIndex) => 
+    row.map((value, colIndex) => ({
+      target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex}`,
+      formula: value.toString()
+    }))
+  );
+}
+
+/**
  * Structures raw analysis output into a clean tabular format using LLM
  * @param rawOutput - The raw output from Python analysis
  * @param analysisGoal - The goal/context of the analysis
@@ -105,22 +133,111 @@ export async function structureAnalysisOutput(rawOutput: string, analysisGoal: s
 }
 
 /**
- * Parses structured output into cell updates
- * @param structuredOutput - The CSV-like structured output
+ * Converts table data into standardized cell updates
+ * @param tableData - The table data to convert
  * @param startCell - Starting cell reference (e.g. 'A1')
+ * @param sheetName - Optional sheet name for the updates
  * @returns Array of cell updates
  */
-export function generateCellUpdates(structuredOutput: string, startCell: string) {
-  const outputRows = structuredOutput.trim().split('\n')
-    .map(row => row.split(',').map(cell => cell.trim()));
+export function convertTableToCellUpdates(
+  tableData: { headers: string[]; rows: string[][] },
+  startCell: string,
+  sheetName?: string
+): Array<{target: string, formula: string, sheetName?: string}> {
+  const updates: Array<{target: string, formula: string, sheetName?: string}> = [];
+  
+  if (!tableData.headers || !tableData.rows) return updates;
   
   const colLetter = startCell.match(/[A-Z]+/)?.[0] || 'A';
   const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1');
+  
+  // Add headers
+  tableData.headers.forEach((header, index) => {
+    updates.push({
+      target: `${String.fromCharCode(colLetter.charCodeAt(0) + index)}${rowNumber}`,
+      formula: header,
+      sheetName
+    });
+  });
+  
+  // Add data rows
+  tableData.rows.forEach((row, rowIndex) => {
+    row.forEach((cell, colIndex) => {
+      updates.push({
+        target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex + 1}`,
+        formula: cell,
+        sheetName
+      });
+    });
+  });
+  
+  return updates;
+}
 
-  return outputRows.map((row, rowIndex) => 
-    row.map((value, colIndex) => ({
-      target: `${String.fromCharCode(colLetter.charCodeAt(0) + colIndex)}${rowNumber + rowIndex}`,
-      formula: value.toString()
-    }))
-  );
-} 
+/**
+ * Analyzes a document with Vision API and returns a structured table
+ * @param operation - The operation to perform on the document
+ * @param documentImage - The image of the document
+ * @param model - The model to use for the analysis
+ * @returns Promise<TableConversionResult> - Structured table with headers and rows
+ */
+export const analyzeDocumentWithVision = async (operation: string, documentImage: string, model: string = "gpt-4o"): Promise<TableConversionResult> => {
+  const visionPrompt = `Analyze this document and ${operation.replace('_', ' ')} from it. 
+  Format the output as a structured table with headers and rows that can be directly inserted into a spreadsheet.
+  
+  Return a JSON object with exactly this structure:
+  {
+    "headers": ["Column1", "Column2", ...],
+    "rows": [
+      ["row1col1", "row1col2", ...],
+      ["row2col1", "row2col2", ...],
+      ...
+    ],
+    "note": "Optional explanation about the data structure"
+  }
+
+  Guidelines:
+  1. If the document contains a table, extract it directly with proper headers
+  2. If the document contains key-value pairs, make the keys one column and values another
+  3. If the document contains lists or arrays, create appropriate columns
+  4. Ensure consistent data types in each column
+  5. Include meaningful headers that describe the data
+  6. Don't include more than 20 columns maximum
+  7. Your response must be valid JSON that can be parsed with JSON.parse()`;
+  
+  const response = await openai.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: "user", 
+        content: [
+          { type: "text", text: visionPrompt },
+          { type: "image_url", image_url: { url: documentImage } }
+        ]
+      }
+    ],
+    temperature: 0.1,
+    max_tokens: 1500,
+    response_format: { type: "json_object" }
+  });
+
+  const content = response.choices[0]?.message?.content || "{}";
+  
+  try {
+    const tableData = JSON.parse(content) as TableConversionResult;
+    
+    // Validate the structure
+    if (!tableData.headers || !tableData.rows) {
+      throw new Error("Invalid table structure returned from LLM");
+    }
+    
+    return tableData;
+  } catch (error: any) {
+    console.error("Error parsing vision API response:", error);
+    // Return a simple fallback structure with the error
+    return {
+      headers: ["Error"],
+      rows: [["Failed to process document: " + error.message]]
+    };
+  }
+};

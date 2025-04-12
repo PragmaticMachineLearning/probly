@@ -1,30 +1,24 @@
 import {
- formatSpreadsheetData,
- generateCellUpdates,
- structureAnalysisOutput
+formatSpreadsheetData,
+generateCellUpdates,
+structureAnalysisOutput,
 } from "@/utils/analysisUtils";
 
 import { OpenAI } from "openai";
 import { PyodideSandbox } from "@/utils/pyodideSandbox";
 import { SYSTEM_MESSAGE } from "@/constants/messages";
+import { analyzeDocumentWithVision } from "@/utils/analysisUtils";
+import { convertTableToCellUpdates } from "@/utils/analysisUtils";
 import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
-
-// Define a generic message type instead of using OpenAI's type
-interface ChatMessage {
-  role: "system" | "user" | "assistant" | "function";
-  content: string;
-  name?: string;
-  function_call?: any;
-}
 
 dotenv.config();
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
-const model = "gpt-4o";
+const MODEL = "gpt-4o";
 
 async function handleLLMRequest(
   message: string,
@@ -33,6 +27,7 @@ async function handleLLMRequest(
   activeSheetName: string = "Sheet 1",
   sheetsInfo: { id: string, name: string }[] = [],
   res: any,
+  documentImage?: string,
 ): Promise<void> {
   let aborted = false;
   let sandbox: PyodideSandbox | null = null;
@@ -58,70 +53,43 @@ async function handleLLMRequest(
     console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
     console.log("SHEETS CONTEXT >>>", sheetsContext);
     
-    const userMessage = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
+    // Check if we have a document image
+    const hasDocumentImage = !!documentImage;
+    
+    // Standard text-only message for the initial request
+    let userMessageContent = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
+    
+    // If document is provided, add context about it but don't use vision capabilities yet
+    // We'll use vision in the document_analysis tool if needed
+    if (hasDocumentImage) {
+      userMessageContent += "\n\nI've uploaded a document that needs to be analyzed.";
+    }
     
     // Format messages for OpenAI API
     const messages = [
       { role: "system", content: SYSTEM_MESSAGE },
       ...chatHistory.slice(-10),
-      { role: "user", content: userMessage },
+      { role: "user", content: userMessageContent },
     ];
 
-    // First streaming call
-    const stream = await openai.chat.completions.create({
+    // Non-streaming call to OpenAI API
+    const completion = await openai.chat.completions.create({
       messages: messages as any,
-      model: model,
-      stream: true,
+      model: MODEL,
+      stream: false,
     });
 
-    let buffer = '';
-    const chunkSize = 100; // Characters
-
-    for await (const chunk of stream) {
-      if (aborted) {
-        console.log("Aborting stream processing");
-        await stream.controller.abort();
-        return;
-      }
-
-      const content = chunk.choices[0]?.delta?.content || "";
-      if (content) {
-        buffer += content;
-        
-        // Only send to client when buffer reaches a certain size
-        // This reduces the number of network packets
-        if (buffer.length >= chunkSize) {
-          res.write(
-            `data: ${JSON.stringify({
-              response: buffer,
-              streaming: true,
-            })}\n\n`,
-          );
-          buffer = '';
-        }
-      }
-    }
-
-    // Send any remaining buffer
-    if (buffer.length > 0) {
-      res.write(
-        `data: ${JSON.stringify({
-          response: buffer,
-          streaming: true,
-        })}\n\n`,
-      );
-    }
-
-    // Check again before making the tool call
     if (aborted) return;
 
-    // Tool completion call
+    const response = completion.choices[0]?.message?.content || "";
+    
+    // Tool completion call - always use standard model
     const toolCompletion = await openai.chat.completions.create({
       messages: [
         ...messages,
-        { role: "assistant", content: buffer },
+        { role: "assistant", content: response },
       ],
-      model: model,
+      model: MODEL,
       tools: tools as any,
       stream: false,
     });
@@ -135,7 +103,7 @@ async function handleLLMRequest(
     if (toolCalls?.length) {
       const toolCall = toolCalls[0];
       let toolData: any = {
-        response: buffer,
+        response: response,
       };
 
       if (toolCall.function.name === "set_spreadsheet_cells") {
@@ -166,10 +134,7 @@ async function handleLLMRequest(
           const { analysis_goal, suggested_code, start_cell } = JSON.parse(
             toolCall.function.arguments,
           );    
-          console.log("SUGGESTED CODE >>>", suggested_code);
-          console.log("START CELL >>>", start_cell);
-          console.log("ANALYSIS GOAL >>>", analysis_goal);
-
+      
           if (aborted) {
             await sandbox.destroy();
             return;
@@ -185,7 +150,6 @@ async function handleLLMRequest(
 
           // Structure the output using LLM
           const structuredOutput = await structureAnalysisOutput(result.stdout, analysis_goal);
-          console.log("STRUCTURED OUTPUT >>>", structuredOutput);
           
           // Generate cell updates from structured output
           const generatedUpdates = generateCellUpdates(structuredOutput, start_cell);
@@ -196,11 +160,6 @@ async function handleLLMRequest(
           toolData = {
             response: responseMessage,
             updates: generatedUpdates.flat(), // Flatten the updates array
-            analysis: {
-              goal: analysis_goal,
-              output: structuredOutput,
-              error: result.stderr,
-            },
           };
         } catch (error) {
           console.error("Error executing Python code:", error);
@@ -264,9 +223,38 @@ async function handleLLMRequest(
         };
         
         toolData.response = `I've removed the sheet "${sheetName}".`;
-      } 
+      } else if (toolCall.function.name === "document_analysis") {
+        if (aborted) return;
+        
+        const args = JSON.parse(toolCall.function.arguments);
+        const { operation, target_sheet, start_cell } = args;
+        
+        // We need the document image for analysis
+        if (!documentImage) {
+          toolData.response = "Error: No document image provided for analysis.";
+        } else {
+          try {
+            // Get table data directly from vision API
+            const tableData = await analyzeDocumentWithVision(operation, documentImage);
+            
+            // Generate cell updates using the standardized function
+            const updates = convertTableToCellUpdates(tableData, start_cell, target_sheet || activeSheetName);
+            
+            // Include note from table conversion if available
+            const noteText = tableData.note ? `\n\nNote: ${tableData.note}` : '';
+           
+            toolData = {
+              response: `Successfully extracted data using ${operation.replace('_', ' ')}. The data has been placed in your spreadsheet${start_cell ? ` starting at cell ${start_cell}` : ''}.${noteText}`,
+              updates: updates,
+            }
+          
+          } catch (error: any) {
+            console.error("Error processing document:", error);
+            toolData.response = `Error processing document: ${error.message || "Unknown error"}`;
+          }
+        }
+      }
       
-
       // Only send response if not aborted
       if (!aborted) {
         res.write(
@@ -279,7 +267,7 @@ async function handleLLMRequest(
     } else if (!aborted) {
       res.write(
         `data: ${JSON.stringify({
-          response: buffer,
+          response: response,
           streaming: false,
         })}\n\n`,
       );
@@ -314,10 +302,32 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
 
     try {
-      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo } = req.body;
+      const { message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, documentImage } = req.body;
+      
+      // Check if document image is present and validate its size
+      if (documentImage) {
+        // Calculate base64 size (each character represents 6 bits, so 4 characters = 3 bytes)
+        const base64Size = Math.ceil((documentImage.length * 3) / 4);
+        const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+        
+        if (base64Size > maxSize) {
+          res.write(
+            `data: ${JSON.stringify({ 
+              error: "File size exceeds 10MB limit. Please compress your image or use a smaller file.",
+              details: {
+                fileSize: `${(base64Size / (1024 * 1024)).toFixed(2)}MB`,
+                maxSize: "10MB"
+              }
+            })}\n\n`
+          );
+          res.end();
+          return;
+        }
+      }
+
       // Race between the LLM request and the client disconnecting
       await Promise.race([
-        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res),
+        handleLLMRequest(message, spreadsheetData, chatHistory, activeSheetName, sheetsInfo, res, documentImage),
         disconnectPromise,
       ]);
     } catch (error: any) {
@@ -332,3 +342,11 @@ export default async function handler(req: any, res: any): Promise<void> {
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 }
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb'  // Increased from default 1mb to handle larger document uploads
+    }
+  }
+};

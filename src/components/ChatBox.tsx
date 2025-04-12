@@ -1,4 +1,4 @@
-import { BookOpen, Check, Edit2, Loader2, Plus, Save, Search, Send, Square, Trash2, X } from "lucide-react";
+import { BookOpen, Check, Edit2, FileUp, Loader2, Plus, Save, Search, Send, Square, Trash2, X } from "lucide-react";
 import { CellUpdate, ChatMessage } from "@/types/api";
 import { useEffect, useRef, useState } from "react";
 
@@ -13,7 +13,7 @@ interface Prompt {
 }
 
 interface ChatBoxProps {
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, documentImage?: string) => Promise<void>;
   onStop: () => void;
   onAccept: (updates: CellUpdate[], messageId: string) => void;
   onReject: (messageId: string) => void;
@@ -45,7 +45,90 @@ const ChatBox = ({
   const [newPromptContent, setNewPromptContent] = useState('');
   const [isAddingPrompt, setIsAddingPrompt] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [uploadedDocumentName, setUploadedDocumentName] = useState<string | null>(null);
+  const [isImageFile, setIsImageFile] = useState(false);
+  const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileDialogTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Add image compression constants
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+  const MAX_IMAGE_DIMENSION = 1200; // Maximum width/height for images
+  const COMPRESSION_QUALITY = 0.7; // 70% quality for JPEG compression
+
+  interface CompressedFile {
+    file: File;
+    wasCompressed: boolean;
+  }
+
+  // Add compression utility function
+  const compressImageFile = async (file: File): Promise<CompressedFile> => {
+    // If it's not an image or is under max size, return original
+    if (!file.type.startsWith('image/') || file.size <= MAX_FILE_SIZE) {
+      return { file, wasCompressed: false };
+    }
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let { width, height } = img;
+        
+        // Only resize if either dimension exceeds MAX_IMAGE_DIMENSION
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          const scale = Math.min(
+            MAX_IMAGE_DIMENSION / width,
+            MAX_IMAGE_DIMENSION / height
+          );
+          
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Draw and compress
+        ctx?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              resolve({ file, wasCompressed: false });
+              return;
+            }
+            
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            
+            resolve({
+              file: compressedFile,
+              wasCompressed: true
+            });
+          },
+          'image/jpeg',
+          COMPRESSION_QUALITY
+        );
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({ file, wasCompressed: false });
+      };
+      
+      img.src = url;
+    });
+  };
+
   // Use external state if provided, otherwise use internal state
   const promptLibraryOpen = externalIsPromptLibraryOpen !== undefined ? externalIsPromptLibraryOpen : showPromptLibrary;
   const setPromptLibraryOpen = externalSetIsPromptLibraryOpen || setShowPromptLibrary;
@@ -88,7 +171,7 @@ const ChatBox = ({
   useEffect(() => {
     if (chatHistory.length > 0) {
       const lastMessage = chatHistory[chatHistory.length - 1];
-      setIsLoading(!!lastMessage.streaming);
+      setIsLoading(lastMessage.status === "pending");
     }
   }, [chatHistory]);
 
@@ -134,19 +217,26 @@ const ChatBox = ({
   }, [promptLibraryOpen, setPromptLibraryOpen, externalIsPromptLibraryOpen]);
 
   const handleSend = async () => {
-    if (message.trim() || isLoading) {
+    if (message.trim() || uploadedDocument || isLoading) {
       if (isLoading) {
         onStop();
-        setIsLoading(false);
         return;
       }
       const messageToSend = message;
+      const documentToSend = uploadedDocument;
+      
+      // Clear message and document preview immediately
       setMessage("");
+      setUploadedDocument(null);
+      setUploadedDocumentName(null);
+      setIsImageFile(false);
+      
       setIsLoading(true);
       try {
-        await onSend(messageToSend);
+        await onSend(messageToSend, documentToSend || undefined);
       } catch (error) {
         console.error("Error details:", error);
+        setIsLoading(false);
       }
     }
   };
@@ -264,6 +354,141 @@ const ChatBox = ({
     }
   };
 
+  // Add this effect to handle ESC key for file dialog
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFileDialogOpen) {
+        // Reset the file dialog state
+        setIsFileDialogOpen(false);
+        
+        // Clear any existing timeout
+        if (fileDialogTimeoutRef.current) {
+          clearTimeout(fileDialogTimeoutRef.current);
+          fileDialogTimeoutRef.current = null;
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFileDialogOpen]);
+
+  // Update the file button click handler
+  const handleFileButtonClick = () => {
+    // Set state to indicate file dialog is opening
+    setIsFileDialogOpen(true);
+    
+    // Set a timeout to reset the state if no file is selected
+    // This handles the case when the user closes the dialog without selecting a file
+    fileDialogTimeoutRef.current = setTimeout(() => {
+      setIsFileDialogOpen(false);
+    }, 1000);
+    
+    // Use requestAnimationFrame to ensure UI updates before triggering file dialog
+    requestAnimationFrame(() => {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+    });
+  };
+
+  // Update the file upload handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Clear the timeout since a file was selected or dialog was closed
+    if (fileDialogTimeoutRef.current) {
+      clearTimeout(fileDialogTimeoutRef.current);
+      fileDialogTimeoutRef.current = null;
+    }
+    
+    // Reset the file dialog state
+    setIsFileDialogOpen(false);
+    
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      setUploadingDocument(true);
+      
+      // Check file size first
+      if (file.size > MAX_FILE_SIZE) {
+        if (!file.type.startsWith('image/')) {
+          throw new Error(`File size must be less than ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+        }
+        
+        // Try to compress if it's an image
+        const { file: processedFile, wasCompressed } = await compressImageFile(file);
+        
+        if (processedFile.size > MAX_FILE_SIZE) {
+          throw new Error(`Image too large even after compression. Please use a smaller image.`);
+        }
+        
+        if (wasCompressed) {
+          console.log(`Image compressed from ${file.size} to ${processedFile.size} bytes`);
+        }
+        
+        // Convert compressed file to base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(processedFile);
+        });
+        
+        setUploadedDocument(base64);
+        setUploadedDocumentName(file.name);
+        setIsImageFile(true);
+        
+      } else {
+        // Handle normal-sized files
+        setIsImageFile(file.type.startsWith('image/'));
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        
+        setUploadedDocument(base64);
+        setUploadedDocumentName(file.name);
+      }
+      
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      // Clear the uploaded document on error
+      setUploadedDocument(null);
+      setUploadedDocumentName(null);
+      setIsImageFile(false);
+        console.log("Document cleared:", uploadedDocument);
+    } finally {
+      setUploadingDocument(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveDocument = () => {
+    setUploadedDocument(null);
+    setUploadedDocumentName(null);
+    setIsImageFile(false);
+        console.log("Document cleared:", uploadedDocument);
+  };
+
+  // Add this useEffect to clear document when a new message is added
+  useEffect(() => {
+    if (chatHistory.length > 0) {
+      const lastMessage = chatHistory[chatHistory.length - 1];
+      // If this is a new message (not pending) and it has an image, clear the document
+      if (lastMessage.status !== "pending" && lastMessage.hasImage) {
+        setUploadedDocument(null);
+        setUploadedDocumentName(null);
+        setIsImageFile(false);
+      }
+    }
+  }, [chatHistory]);
+
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
       {/* Header */}
@@ -277,7 +502,7 @@ const ChatBox = ({
         <div className="flex gap-2">
           <button
             onClick={togglePromptLibrary}
-            className={`p-2 ${promptLibraryOpen ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:text-blue-500 hover:bg-blue-50'} rounded-full transition-all duration-200`}
+            className={`p-2 ${promptLibraryOpen ? 'text-[#1A6B4C] bg-[#1A6B4C]/10' : 'text-gray-500 hover:text-[#1A6B4C] hover:bg-[#1A6B4C]/10'} rounded-full transition-all duration-200`}
             title={promptLibraryOpen ? "Back to chat (Ctrl+Shift+L)" : "Open prompt library (Ctrl+Shift+L)"}
           >
             <BookOpen size={18} />
@@ -308,7 +533,7 @@ const ChatBox = ({
                   placeholder="Search prompts..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C]"
                 />
               </div>
               <button
@@ -322,16 +547,16 @@ const ChatBox = ({
                     setNewPromptContent('');
                   }
                 }}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+                className="p-2 bg-[#1A6B4C] text-white rounded-full hover:bg-[#1A6B4C]/80 transition-all duration-200 flex items-center justify-center"
+                title={isAddingPrompt && !editingPromptId ? "Cancel" : "Add Prompt"}
               >
                 {isAddingPrompt && !editingPromptId ? <X size={18} /> : <Plus size={18} />}
-                {isAddingPrompt && !editingPromptId ? 'Cancel' : 'Add Prompt'}
               </button>
             </div>
             
             {/* Add/Edit Prompt Form */}
             {isAddingPrompt && (
-              <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+              <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-[#1A6B4C]/5">
                 <div className="mb-3">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Prompt Title</label>
                   <input
@@ -339,7 +564,7 @@ const ChatBox = ({
                     value={newPromptTitle}
                     onChange={(e) => setNewPromptTitle(e.target.value)}
                     placeholder="Enter a descriptive title"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C]"
                   />
                 </div>
                 <div className="mb-3">
@@ -349,25 +574,25 @@ const ChatBox = ({
                     onChange={(e) => setNewPromptContent(e.target.value)}
                     placeholder="Enter your prompt template..."
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1A6B4C] resize-none"
                   />
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleSavePrompt}
                     disabled={!newPromptTitle.trim() || !newPromptContent.trim()}
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    className="p-2 bg-[#1A6B4C] text-white rounded-full hover:bg-[#1A6B4C]/80 transition-all duration-200 flex items-center justify-center disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    title={editingPromptId ? "Update Prompt" : "Save Prompt"}
                   >
                     <Save size={18} />
-                    {editingPromptId ? 'Update Prompt' : 'Save Prompt'}
                   </button>
                   {editingPromptId && (
                     <button
                       onClick={handleCancelEdit}
-                      className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-2"
+                      className="p-2 bg-gray-500 text-white rounded-full hover:bg-gray-600 transition-all duration-200 flex items-center justify-center"
+                      title="Cancel"
                     >
                       <X size={18} />
-                      Cancel
                     </button>
                   )}
                 </div>
@@ -386,16 +611,17 @@ const ChatBox = ({
                 {filteredPrompts.map((prompt) => (
                   <div 
                     key={prompt.id}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer group"
+                    className="border border-gray-200 rounded-lg p-4 hover:border-[#1A6B4C] hover:bg-[#1A6B4C]/5 transition-all duration-200 cursor-pointer group"
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h3 className="font-medium text-gray-800">{prompt.title}</h3>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleSelectPrompt(prompt.content)}
-                          className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+                          className="p-1.5 text-[#1A6B4C] hover:text-[#1A6B4C]/80 hover:bg-[#1A6B4C]/10 rounded-full transition-all duration-200"
+                          title="Use Prompt"
                         >
-                          Use
+                          <Check size={16} />
                         </button>
                         {!predefinedPrompts.some(p => p.id === prompt.id) && (
                           <>
@@ -404,7 +630,8 @@ const ChatBox = ({
                                 e.stopPropagation();
                                 handleEditPrompt(prompt);
                               }}
-                              className="text-gray-500 hover:text-gray-700 transition-colors"
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all duration-200"
+                              title="Edit Prompt"
                             >
                               <Edit2 size={16} />
                             </button>
@@ -413,7 +640,8 @@ const ChatBox = ({
                                 e.stopPropagation();
                                 handleDeletePrompt(prompt.id);
                               }}
-                              className="text-red-500 hover:text-red-700 transition-colors"
+                              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full transition-all duration-200"
+                              title="Delete Prompt"
                             >
                               <Trash2 size={16} />
                             </button>
@@ -444,11 +672,31 @@ const ChatBox = ({
                 <div key={chat.id} className="space-y-3 animate-fadeIn">
                   {/* User Message */}
                   <div className="flex justify-end">
-                    <div className="bg-blue-500 text-white rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-shadow duration-200">
-                      <p className="text-sm break-words">{chat.text}</p>
-                      <span className="text-xs opacity-75 mt-1 block">
-                        {new Date(chat.timestamp).toLocaleTimeString()}
-                      </span>
+                    <div className="flex flex-col items-end gap-2">
+                      {/* Document Preview above message */}
+                      {chat.hasImage && chat.documentImage && (
+                        <div className="w-32 h-32 rounded-lg overflow-hidden shadow-md bg-white border border-gray-200">
+                          {chat.documentImage.startsWith('data:image/') ? (
+                            <img 
+                              src={chat.documentImage} 
+                              alt="Document preview"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                              <FileUp size={24} className="text-gray-500" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Message Bubble */}
+                      <div className="bg-[#1A6B4C] text-white rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-shadow duration-200">
+                        <p className="text-sm break-words">{chat.text}</p>
+                        <span className="text-xs opacity-75 mt-1 block">
+                          {new Date(chat.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -456,27 +704,14 @@ const ChatBox = ({
                   <div className="flex justify-start">
                     <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2 max-w-[80%] shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200">
                       <div className="text-sm text-gray-800 break-words">
-                        {chat.streaming ? (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-gray-500">
-                              <Loader2 size={14} className="animate-spin" />
-                              <span className="text-xs">AI is generating response...</span>
-                            </div>
-                            <div className="border-l-2 border-blue-200 pl-3 font-mono">
-                              {chat.response}
-                            </div>
-                          </div>
-                        ) : (
-                          <ToolResponse
-                            response={chat.response}
-                            updates={chat.updates}
-                            chartData={chat.chartData}
-                            analysis={chat.analysis}
-                            status={chat.status}
-                            onAccept={() => onAccept(chat.updates || [], chat.id)}
-                            onReject={() => onReject(chat.id)}
-                          />
-                        )}
+                        <ToolResponse
+                          response={chat.response}
+                          updates={chat.updates}
+                          chartData={chat.chartData}
+                          status={chat.status}
+                          onAccept={() => onAccept(chat.updates || [], chat.id)}
+                          onReject={() => onReject(chat.id)}
+                        />
                       </div>
                       <span className="text-xs text-gray-400 mt-1 block">
                         {new Date(chat.timestamp).toLocaleTimeString()}
@@ -489,31 +724,94 @@ const ChatBox = ({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area */}
-          <div className="p-4 bg-white border-t border-gray-200">
-            <div className="flex gap-2 items-end relative">
+          {/* Input Area with Document Preview */}
+          <div className="bg-white border-t border-gray-200">
+            {/* Document Preview Area - Always present but with height transition */}
+            <div className={`overflow-hidden transition-[height,opacity] duration-200 ease-in-out ${
+              uploadedDocument ? 'h-[84px] opacity-100' : 'h-0 opacity-0'
+            }`}>
+              {uploadedDocument && uploadedDocumentName && (
+                <div className="px-4 pt-3 border-b border-gray-100">
+                  {isImageFile && uploadedDocument && (
+                    <div className="relative w-[60px] h-[60px] group mb-3">
+                      <div className="rounded-lg overflow-hidden border border-gray-200 w-full h-full">
+                        <img 
+                          src={uploadedDocument} 
+                          alt="Document preview"
+                          className="w-full h-full object-contain bg-white"
+                        />
+                      </div>
+                      <button 
+                        onClick={handleRemoveDocument}
+                        className="absolute -top-2 -right-2 p-1.5 bg-gray-900/90 hover:bg-gray-900 rounded-full shadow-md text-white hover:text-white transition-colors opacity-0 group-hover:opacity-100 z-10"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Input Box Area */}
+            <div className="p-4">
+              {/* Textarea spanning full width */}
               <textarea
                 ref={textareaRef}
                 value={message}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200"
-                placeholder="Type your message..."
+                className={`w-full px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1A6B4C] focus:border-transparent text-sm resize-none min-h-[80px] bg-white text-gray-800 transition-all duration-200 mb-3 ${
+                  uploadedDocument ? 'border-transparent' : 'border border-gray-200'
+                }`}
+                placeholder={uploadedDocument ? "What would you like to know about this document?" : "Type your message..."}
                 disabled={isLoading}
                 rows={3}
               />
-              <button
-                onClick={handleSend}
-                disabled={!message.trim() && !isLoading}
-                className="p-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-11 w-11 flex items-center justify-center group"
-                title={isLoading ? "Stop generating" : "Send message"}
-              >
-                {isLoading ? (
-                  <Square size={18} className="fill-current animate-pulse" />
-                ) : (
-                  <Send size={18} className="group-hover:scale-110 transition-transform duration-200" />
-                )}
-              </button>
+              
+              {/* Buttons row below textarea */}
+              <div className="flex justify-between items-center">
+                {/* File upload button on the left */}
+                <button
+                  onClick={handleFileButtonClick}
+                  disabled={isLoading || uploadingDocument}
+                  className="p-2.5 bg-[#1A6B4C] hover:bg-[#1A6B4C]/80 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center shadow-md"
+                  title="Upload document"
+                >
+                  {uploadingDocument ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : isFileDialogOpen ? (
+                    <Loader2 size={12} className="animate-pulse" />
+                  ) : (
+                    <Plus size={12} />
+                  )}
+                </button>
+                
+                {/* Send button on the right */}
+                <button
+                  onClick={handleSend}
+                  disabled={(!message.trim() && !uploadedDocument) && !isLoading}
+                  className="p-2.5 bg-[#1A6B4C] hover:bg-[#1A6B4C]/80 disabled:bg-gray-300 text-white rounded-full transition-all duration-200 disabled:cursor-not-allowed h-8 w-8 flex items-center justify-center group"
+                  title={isLoading ? "Stop generating" : "Send message"}
+                >
+                  {isLoading ? (
+                    <Square size={12} className="fill-current animate-pulse" />
+                  ) : (
+                    <Send size={12} className="group-hover:scale-110 transition-transform duration-200" />
+                  )}
+                </button>
+              </div>
+              
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileUpload}
+                accept="image/png,image/jpeg,image/jpg,application/pdf"
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+              />
             </div>
           </div>
         </>

@@ -117,14 +117,16 @@ const SpreadsheetApp = () => {
     }
   };
 
-  const handleSend = async (message: string) => {
+  const handleSend = async (message: string, documentImage?: string) => {
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       text: message,
       response: "",
       timestamp: new Date(),
       status: "pending",
-      streaming: true,
+      // If an image was uploaded, store this info in the message
+      hasImage: !!documentImage,
+      documentImage: documentImage
     };
     setChatHistory((prev) => [...prev, newMessage]);
 
@@ -146,6 +148,7 @@ const SpreadsheetApp = () => {
           activeSheetName: activeSheetName,
           sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
+          documentImage: documentImage,
         }),
         signal: abortController.current.signal,
       });
@@ -229,14 +232,7 @@ const SpreadsheetApp = () => {
               }
               
               if (parsedData.response) {
-                if (parsedData.streaming) {
-                  // For streaming content, append to the existing response
-                  accumulatedResponse += parsedData.response;
-                } else {
-                  // For final content, replace the entire response
-                  accumulatedResponse = parsedData.response;
-                }
-
+                accumulatedResponse = parsedData.response;
                 updates = parsedData.updates;
                 chartData = parsedData.chartData;
               }
@@ -251,8 +247,7 @@ const SpreadsheetApp = () => {
                         updates: updates,
                         chartData: chartData,
                         analysis: parsedData?.analysis,
-                        streaming: parsedData.streaming ?? false,
-                        status: updates || chartData ? "pending" : null,
+                        status: updates || chartData ? "completed" : null,
                       }
                     : msg,
                 ),
@@ -279,8 +274,7 @@ const SpreadsheetApp = () => {
                 updates: updates,
                 chartData: chartData,
                 analysis: lastParsedData?.analysis,
-                streaming: false,
-                status: updates || chartData ? "pending" : null,
+                status: updates || chartData ? "completed" : null,
               }
             : msg,
         ),
@@ -294,8 +288,8 @@ const SpreadsheetApp = () => {
             msg.id === newMessage.id
               ? {
                   ...msg,
-                  response: msg.response + "\n[Generation stopped]",
-                  streaming: false,
+                  response: msg.response + "\n Response perished in the flames",
+                  status: null,
                 }
               : msg,
           ),
@@ -313,7 +307,7 @@ const SpreadsheetApp = () => {
                       ? error.message
                       : "An unknown error occurred"
                   }`,
-                  streaming: false,
+                  status: null,
                 }
               : msg,
           ),
@@ -346,16 +340,6 @@ const SpreadsheetApp = () => {
     localStorage.removeItem("chatHistory");
   };
 
-  const handleDataChange = (data: any[][]) => {
-    // We don't need to store this data in state anymore
-    // If needed, we can get it from the spreadsheet context
-  };
-
-  const handleSelectPrompt = (promptText: string) => {
-    setMessage(promptText);
-    setIsPromptLibraryOpen(false);
-    setIsChatOpen(true);
-  };
 
   return (
     <main className="h-screen w-screen flex flex-col bg-gray-50">
