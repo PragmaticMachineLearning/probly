@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import ChatBox from "@/components/ChatBox";
 import { MessageCircle } from "lucide-react";
 import type { SpreadsheetRef } from "@/components/Spreadsheet";
+import { db } from '@/lib/db';
 import dynamic from "next/dynamic";
 
 const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod => mod.default), {
@@ -23,6 +24,31 @@ const Spreadsheet = dynamic(() => import("@/components/Spreadsheet").then(mod =>
     </div>
   ),
 });
+
+// Helper function to load chat history from IndexedDB
+const loadChatHistory = async (): Promise<ChatMessage[]> => {
+  try {
+    return await db.getChatHistory();
+  } catch (error) {
+    console.error("Error loading chat history from IndexedDB:", error);
+    return [];
+  }
+};
+
+// Helper function to save chat history to IndexedDB
+const saveChatHistory = async (history: ChatMessage[]): Promise<void> => {
+  try {
+    // Clear existing chat history
+    await db.clearChatHistory();
+    
+    // Add each message to the database
+    for (const message of history) {
+      await db.addChatMessage(message);
+    }
+  } catch (error) {
+    console.error("Error saving chat history to IndexedDB:", error);
+  }
+};
 
 const SpreadsheetApp = () => {
   const { 
@@ -67,41 +93,36 @@ const SpreadsheetApp = () => {
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, [isPromptLibraryOpen]);
 
-  // Load chat open state from localStorage
+  // Load chat open state from IndexedDB
   useEffect(() => {
-    const savedState = localStorage.getItem("chatOpen");
-    if (savedState) {
-      setIsChatOpen(JSON.parse(savedState));
-    }
+    const loadChatOpen = async () => {
+      const isOpen = await loadChatOpenState();
+      setIsChatOpen(isOpen);
+    };
+    
+    loadChatOpen();
   }, []);
 
-  // Save chat open state to localStorage
+  // Save chat open state to IndexedDB when it changes
   useEffect(() => {
-    localStorage.setItem("chatOpen", JSON.stringify(isChatOpen));
+    saveChatOpenState(isChatOpen);
   }, [isChatOpen]);
 
-  // Load chat history from localStorage
+  // Load chat history from IndexedDB
   useEffect(() => {
-    const savedHistory = localStorage.getItem("chatHistory");
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        setChatHistory(
-          parsed.map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-          })),
-        );
-      } catch (error) {
-        console.error("Error loading chat history:", error);
-        localStorage.removeItem("chatHistory");
-      }
-    }
+    const loadHistory = async () => {
+      const history = await loadChatHistory();
+      setChatHistory(history);
+    };
+    
+    loadHistory();
   }, []);
 
-  // Save chat history to localStorage
+  // Save chat history to IndexedDB when it changes
   useEffect(() => {
-    localStorage.setItem("chatHistory", JSON.stringify(chatHistory));
+    if (chatHistory.length > 0) {
+      saveChatHistory(chatHistory);
+    }
   }, [chatHistory]);
 
   // Update spreadsheetData when active sheet changes
@@ -109,6 +130,23 @@ const SpreadsheetApp = () => {
     // This effect is no longer needed since we're not tracking spreadsheetData
     // We can access the active sheet data directly when needed via getActiveSheetData()
   }, [activeSheetId, getActiveSheetData]);
+
+  // Cleanup database on initial load
+  useEffect(() => {
+    const cleanupDatabase = async () => {
+      try {
+        // Check for and clean up duplicate sheets on startup
+        const removedCount = await db.cleanupDuplicateSheets();
+        if (removedCount > 0) {
+          console.log(`Cleaned up ${removedCount} duplicate sheets on startup.`);
+        }
+      } catch (error) {
+        console.error("Error cleaning up database on startup:", error);
+      }
+    };
+    
+    cleanupDatabase();
+  }, []);
 
   const handleStop = () => {
     if (abortController.current) {
@@ -335,11 +373,34 @@ const SpreadsheetApp = () => {
     );
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     setChatHistory([]);
-    localStorage.removeItem("chatHistory");
+    try {
+      await db.clearChatHistory();
+    } catch (error) {
+      console.error("Error clearing chat history from IndexedDB:", error);
+    }
   };
 
+  // Helper function to load chat open state from IndexedDB
+  const loadChatOpenState = async (): Promise<boolean> => {
+    try {
+      const chatOpen = await db.getPreference('chatOpen');
+      return chatOpen === true;
+    } catch (error) {
+      console.error("Error loading chat open state from IndexedDB:", error);
+      return false;
+    }
+  };
+
+  // Helper function to save chat open state to IndexedDB
+  const saveChatOpenState = async (isOpen: boolean): Promise<void> => {
+    try {
+      await db.setPreference('chatOpen', isOpen);
+    } catch (error) {
+      console.error("Error saving chat open state to IndexedDB:", error);
+    }
+  };
 
   return (
     <main className="h-screen w-screen flex flex-col bg-gray-50">

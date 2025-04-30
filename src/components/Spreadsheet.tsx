@@ -66,11 +66,81 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
     const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
     const [newSheetName, setNewSheetName] = useState("");
     const [showSheetMenu, setShowSheetMenu] = useState<string | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
 
     // Add a debug effect to monitor sheet menu state
     useEffect(() => {
       console.log("Sheet menu state changed:", showSheetMenu);
     }, [showSheetMenu]);
+
+    // Initialize or update Handsontable when sheets and activeSheetId are available
+    useEffect(() => {
+      // Only proceed if we have valid sheet data
+      if (sheets.length === 0 || !activeSheetId) {
+        return;
+      }
+
+      // If hot instance already exists, update it
+      if (hotInstanceRef.current) {
+        const activeSheetData = getActiveSheetData();
+        setCurrentData(activeSheetData);
+        hotInstanceRef.current.updateSettings({ data: activeSheetData }, false);
+        return;
+      }
+
+      // If spreadsheetRef is ready but hotInstance is not yet created
+      if (spreadsheetRef.current && !hotInstanceRef.current) {
+        try {
+          // Get the initial data for the active sheet
+          const activeSheetData = getActiveSheetData();
+          setCurrentData(activeSheetData);
+          
+          // Get the initial config
+          const config = getInitialConfig(activeSheetData);
+          
+          // Add our custom afterChange hook to the config
+          config.afterChange = (changes: any) => {
+            if (changes) {
+              const currentData = hotInstanceRef.current?.getData();
+              if (currentData) {
+                // Use the current activeSheetId from context
+                console.log(`Saving changes to active sheet: ${activeSheetId}`);
+                
+                // Update the data for the active sheet only
+                updateSheetData(activeSheetId, currentData);
+                
+                // Also update our local state
+                setCurrentData(currentData);
+                
+                if (onDataChange) {
+                  onDataChange(currentData);
+                }
+              }
+            }
+          };
+          
+          // Create a new instance with the config
+          hotInstanceRef.current = new Handsontable(
+            spreadsheetRef.current,
+            config
+          );
+          
+          setIsInitialized(true);
+        } catch (error) {
+          console.error("Error initializing spreadsheet:", error);
+        }
+      }
+    }, [sheets, activeSheetId, getActiveSheetData, updateSheetData, onDataChange]);
+
+    // Cleanup Handsontable instance on unmount
+    useEffect(() => {
+      return () => {
+        if (hotInstanceRef.current) {
+          hotInstanceRef.current.destroy();
+          hotInstanceRef.current = null;
+        }
+      };
+    }, []);
 
     const handleImport = async (file: File) => {
       if (!file) return;
@@ -170,54 +240,10 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
       });
     }, [formulaQueue, clearFormula, activeSheetId, updateSheetData]);
 
-    // Initialize Handsontable when component mounts
-    useEffect(() => {
-      if (spreadsheetRef.current && !hotInstanceRef.current) {
-        try {
-          // Get the initial config
-          const config = getInitialConfig(currentData);
-          
-          // Add our custom afterChange hook to the config
-          config.afterChange = (changes: any) => {
-            if (changes) {
-              const currentData = hotInstanceRef.current?.getData();
-              if (currentData) {
-                // Use the current activeSheetId from context
-                console.log(`Saving changes to active sheet: ${activeSheetId}`);
-                
-                // Update the data for the active sheet only
-                updateSheetData(activeSheetId, currentData);
-                
-                // Also update our local state
-                setCurrentData(currentData);
-                
-                if (onDataChange) {
-                  onDataChange(currentData);
-                }
-              }
-            }
-          };
-          
-          // Create a new instance with the config
-          hotInstanceRef.current = new Handsontable(
-            spreadsheetRef.current,
-            config
-          );
-        } catch (error) {
-          console.error("Error initializing spreadsheet:", error);
-        }
-      }
-
-      return () => {
-        if (hotInstanceRef.current) {
-          hotInstanceRef.current.destroy();
-          hotInstanceRef.current = null;
-        }
-      };
-    }, []);
-
     // Update Handsontable when active sheet changes
     useEffect(() => {
+      if (!activeSheetId || sheets.length === 0) return;
+      
       const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
       if (activeSheet) {
         console.log(`Active sheet changed to: ${activeSheet.name} (ID: ${activeSheetId}, HyperFormula ID: ${activeSheet.hyperFormulaId})`);
@@ -253,7 +279,7 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
           }, false);
         }
       }
-    }, [activeSheetId, sheets]);
+    }, [activeSheetId, sheets, updateSheetData, onDataChange]);
 
     // Update Handsontable when currentData changes
     useEffect(() => {
@@ -505,6 +531,15 @@ const Spreadsheet = forwardRef<SpreadsheetRef, SpreadsheetProps>(
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }, [showSheetMenu]);
+
+    // Display a loading state if sheets aren't loaded yet
+    if (sheets.length === 0 || !activeSheetId) {
+      return (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-gray-500">Loading spreadsheet data...</div>
+        </div>
+      );
+    }
 
     return (
       <div className="h-full flex flex-col">

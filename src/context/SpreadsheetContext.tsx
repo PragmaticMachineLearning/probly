@@ -10,6 +10,7 @@ import {
 } from "@/lib/file/spreadsheet/config";
 
 import { CellUpdate } from "@/types/api";
+import { db } from "@/lib/db";
 
 // Define sheet interface
 export interface Sheet {
@@ -96,20 +97,96 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
     new Map(),
   );
   
-  // Initialize with a default sheet
-  const [sheets, setSheets] = useState<Sheet[]>(() => {
-    // Create first sheet and register with HyperFormula
-    const hyperFormulaId = 0; // First sheet in HyperFormula is 0
-    const defaultSheet: Sheet = {
-      id: generateId(),
-      name: "Sheet 1",
-      data: [["", ""], ["", ""]],
-      hyperFormulaId
+  // Initialize with a default sheet if no data in DB
+  const [sheets, setSheets] = useState<Sheet[]>([]);
+  const [activeSheetId, setActiveSheetId] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load data from IndexedDB on initial render
+  useEffect(() => {
+    const loadFromDB = async () => {
+      try {
+        // Load sheets
+        let storedSheets = await db.getAllSheets();
+        
+        // Check for duplicate Sheet 1 and clean up if needed
+        const sheet1Sheets = storedSheets.filter(sheet => sheet.name === "Sheet 1");
+        if (sheet1Sheets.length > 1) {
+          console.log("Found duplicate Sheet 1 entries, cleaning up...");
+          // Keep the sheet with data (if any) or the latest one
+          const sheetToKeep = sheet1Sheets.find(sheet => 
+            sheet.data && 
+            sheet.data.length > 0 && 
+            sheet.data.some(row => row.some(cell => cell !== ""))
+          ) || sheet1Sheets[sheet1Sheets.length - 1];
+          
+          // Delete all other duplicate Sheet 1 entries
+          for (const sheet of sheet1Sheets) {
+            if (sheet.id !== sheetToKeep.id) {
+              await db.deleteSheet(sheet.id);
+            }
+          }
+          
+          // Reload sheets after cleanup
+          storedSheets = await db.getAllSheets();
+        }
+        
+        // Load cell values
+        const storedCellValues = await db.getAllCellValues();
+        
+        // Load formulas
+        const storedFormulas = await db.getAllFormulas();
+        
+        // If no sheets found, create a default sheet
+        if (storedSheets.length === 0) {
+          // Create first sheet and register with HyperFormula
+          const hyperFormulaId = 0; // First sheet in HyperFormula is 0
+          const defaultSheet: Sheet = {
+            id: generateId(),
+            name: "Sheet 1",
+            data: [["", ""], ["", ""]],
+            hyperFormulaId
+          };
+          
+          // Save to the database
+          await db.addSheet(defaultSheet);
+          
+          setSheets([defaultSheet]);
+          setActiveSheetId(defaultSheet.id);
+        } else {
+          // Use loaded sheets
+          setSheets(storedSheets);
+          
+          // Find active sheet in stored preferences or use the first sheet
+          const lastActiveSheetId = storedSheets[0].id;
+          setActiveSheetId(lastActiveSheetId);
+        }
+        
+        // Set cell values and formulas
+        setCellValuesState(storedCellValues);
+        setFormulaQueue(storedFormulas);
+        
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Error loading data from IndexedDB:", error);
+        
+        // Fallback to default initialization
+        const hyperFormulaId = 0;
+        const defaultSheet: Sheet = {
+          id: generateId(),
+          name: "Sheet 1",
+          data: [["", ""], ["", ""]],
+          hyperFormulaId
+        };
+        
+        setSheets([defaultSheet]);
+        setActiveSheetId(defaultSheet.id);
+        setIsLoading(false);
+      }
     };
-    return [defaultSheet];
-  });
-  
-  const [activeSheetId, setActiveSheetId] = useState<string>(() => sheets[0].id);
+    
+    loadFromDB();
+  }, []);
 
   useEffect(() => {
     const nextEvaluatedValues = new Map(evaluatedValues);
@@ -124,11 +201,93 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
     setEvaluatedValues(nextEvaluatedValues);
   }, [formulaQueue, cellValues, activeSheetId, sheets]);
 
+  // Save formula queue changes to IndexedDB
+  useEffect(() => {
+    if (isLoading) return;
+    
+    const saveFormulas = async () => {
+      try {
+        // Use transactions to ensure this operation is atomic
+        await db.transaction('rw', db.formulaQueue, async () => {
+          // We'll use this set to track which formulas to keep
+          const formulaKeysToKeep = new Set<string>();
+          
+          // Process current formulas
+          formulaQueue.forEach((formula, cell) => {
+            formulaKeysToKeep.add(cell);
+            db.setFormula(cell, formula);
+          });
+          
+          // Delete any formulas in the DB that are not in our current queue
+          const existingFormulas = await db.getAllFormulas();
+          existingFormulas.forEach((formula, cell) => {
+            if (!formulaKeysToKeep.has(cell)) {
+              db.deleteFormula(cell);
+            }
+          });
+        });
+      } catch (error) {
+        console.error("Error saving formulas to IndexedDB:", error);
+      }
+    };
+    
+    saveFormulas();
+  }, [formulaQueue, isLoading]);
+
+  // Save cell values changes to IndexedDB
+  useEffect(() => {
+    if (isLoading) return;
+    
+    const saveCellValues = async () => {
+      try {
+        await db.transaction('rw', db.cellValues, async () => {
+          // We'll use this set to track which cell values to keep
+          const cellKeysToKeep = new Set<string>();
+          
+          // Process current cell values
+          cellValues.forEach((value, cell) => {
+            cellKeysToKeep.add(cell);
+            db.setCellValue(cell, value);
+          });
+          
+          // Optional: Delete any cell values in the DB that are not in our current set
+          // Only enable this if you want to completely sync DB with memory state
+          // This may cause performance issues if there are many cells
+          /*
+          const existingCellValues = await db.getAllCellValues();
+          existingCellValues.forEach((value, cell) => {
+            if (!cellKeysToKeep.has(cell)) {
+              db.deleteCellValue(cell);
+            }
+          });
+          */
+        });
+      } catch (error) {
+        console.error("Error saving cell values to IndexedDB:", error);
+      }
+    };
+    
+    saveCellValues();
+  }, [cellValues, isLoading]);
+
+  // Save active sheet ID to IndexedDB
+  useEffect(() => {
+    if (isLoading || !activeSheetId) return;
+    
+    // No explicit save needed for active sheet ID as we're
+    // saving the sheet state independently
+  }, [activeSheetId, isLoading]);
+
   const setFormula = (target: string, formula: string) => {
     setFormulaQueue((prev) => {
       const next = new Map(prev);
       next.set(target, formula);
       return next;
+    });
+    
+    // Save to IndexedDB
+    db.setFormula(target, formula).catch(error => {
+      console.error("Error saving formula to IndexedDB:", error);
     });
   };
 
@@ -147,6 +306,15 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       return next;
     });
+    
+    // Save to IndexedDB
+    db.transaction('rw', db.formulaQueue, async () => {
+      for (const update of updates) {
+        await db.setFormula(update.target, update.formula);
+      }
+    }).catch(error => {
+      console.error("Error saving formulas to IndexedDB:", error);
+    });
   };
 
   const clearFormula = (target: string) => {
@@ -155,6 +323,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       next.delete(target);
       return next;
     });
+    
+    // Remove from IndexedDB
+    db.deleteFormula(target).catch(error => {
+      console.error("Error removing formula from IndexedDB:", error);
+    });
   };
 
   const setChartData = (chartData: any) => {
@@ -162,6 +335,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       const next = new Map(prev);
       next.set("chart", JSON.stringify(chartData));
       return next;
+    });
+    
+    // Save to IndexedDB
+    db.setFormula("chart", JSON.stringify(chartData)).catch(error => {
+      console.error("Error saving chart data to IndexedDB:", error);
     });
   };
 
@@ -173,6 +351,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       return next;
     });
+    
+    // Save to IndexedDB
+    db.setCellValues(updates).catch(error => {
+      console.error("Error saving cell values to IndexedDB:", error);
+    });
   };
 
   const clearCellValues = (target: string) => {
@@ -180,6 +363,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       const next = new Map(prev);
       next.delete(target);
       return next;
+    });
+    
+    // Remove from IndexedDB
+    db.deleteCellValue(target).catch(error => {
+      console.error("Error removing cell value from IndexedDB:", error);
     });
   };
 
@@ -207,6 +395,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       // Update state
       setSheets(prev => [...prev, newSheet]);
       setActiveSheetId(newSheet.id);
+      
+      // Save to IndexedDB
+      db.addSheet(newSheet).catch(error => {
+        console.error("Error saving new sheet to IndexedDB:", error);
+      });
     } catch (error) {
       console.error("Error adding sheet:", error);
     }
@@ -251,6 +444,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
             
             // Update our state to reflect this sheet is now "removed" (but actually just hidden)
             setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+            
+            // Remove from IndexedDB
+            db.deleteSheet(sheetId).catch(error => {
+              console.error("Error removing sheet from IndexedDB:", error);
+            });
           }
         } else {
           // For non-first sheets, we can remove them normally
@@ -258,16 +456,31 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
           
           // Update our state
           setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+          
+          // Remove from IndexedDB
+          db.deleteSheet(sheetId).catch(error => {
+            console.error("Error removing sheet from IndexedDB:", error);
+          });
         }
       } else {
         // If the hyperFormulaId is invalid, just remove it from our state
         console.log("Sheet has invalid hyperFormulaId, removing from state only:", sheetToRemove);
         setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+        
+        // Remove from IndexedDB
+        db.deleteSheet(sheetId).catch(error => {
+          console.error("Error removing sheet from IndexedDB:", error);
+        });
       }
     } catch (error) {
       console.error("Error removing sheet:", error);
       // Even if there's an error with HyperFormula, still remove from our state
       setSheets(prev => prev.filter(sheet => sheet.id !== sheetId));
+      
+      // Remove from IndexedDB
+      db.deleteSheet(sheetId).catch(error => {
+        console.error("Error removing sheet from IndexedDB:", error);
+      });
     }
   };
 
@@ -298,6 +511,12 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
               : sheet
           )
         );
+        
+        // Update in IndexedDB
+        const updatedSheet = { ...sheetToRename, name: finalName };
+        db.updateSheet(updatedSheet).catch(error => {
+          console.error("Error updating sheet name in IndexedDB:", error);
+        });
       }
     } catch (error) {
       console.error("Error renaming sheet:", error);
@@ -330,13 +549,19 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       clearHyperFormulaSheet(sheetToClear.hyperFormulaId);
       
       // Update our state with empty data
-      setSheets(prev => 
-        prev.map(sheet => 
-          sheet.id === sheetId 
-            ? { ...sheet, data: [["", ""], ["", ""]] } 
-            : sheet
-        )
+      const emptyData = [["", ""], ["", ""]];
+      const updatedSheets = sheets.map(sheet => 
+        sheet.id === sheetId 
+          ? { ...sheet, data: emptyData } 
+          : sheet
       );
+      setSheets(updatedSheets);
+      
+      // Update in IndexedDB
+      const updatedSheet = { ...sheetToClear, data: emptyData };
+      db.updateSheet(updatedSheet).catch(error => {
+        console.error("Error updating cleared sheet in IndexedDB:", error);
+      });
     } catch (error) {
       console.error("Error clearing sheet:", error);
     }
@@ -353,13 +578,18 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
       
       if (changes !== null) {
         // Update our state with the new data
-        setSheets(prev => 
-          prev.map(sheet => 
-            sheet.id === sheetId 
-              ? { ...sheet, data } 
-              : sheet
-          )
+        const updatedSheets = sheets.map(sheet => 
+          sheet.id === sheetId 
+            ? { ...sheet, data } 
+            : sheet
         );
+        setSheets(updatedSheets);
+        
+        // Update in IndexedDB - ensure we update the existing record
+        const updatedSheet = { ...sheetToUpdate, data };
+        db.updateSheet(updatedSheet).catch(error => {
+          console.error("Error updating sheet data in IndexedDB:", error);
+        });
       }
     } catch (error) {
       console.error("Error updating sheet data:", error);
@@ -379,6 +609,11 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
   const getSheetByName = (name: string) => {
     return sheets.find(sheet => sheet.name === name);
   };
+
+  // Show loading state if still loading data from IndexedDB
+  if (isLoading) {
+    return <div>Loading spreadsheet data...</div>;
+  }
 
   return (
     <SpreadsheetContext.Provider
