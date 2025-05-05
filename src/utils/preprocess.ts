@@ -1,11 +1,12 @@
-import { Sheet } from "@/context/SpreadsheetContext";
-
 /**
  * Parse a cell reference (e.g., "A1") into row and column indices
  * @param cellRef - Cell reference in A1 notation
  * @returns Object with row and col indices (0-based)
  */
-export function parseCellReference(cellRef: string): { row: number; col: number } {
+export function parseCellReference(cellRef: string): {
+  row: number;
+  col: number;
+} {
   const match = cellRef.match(/([A-Z]+)([0-9]+)/);
   if (!match) {
     throw new Error(`Invalid cell reference: ${cellRef}`);
@@ -29,10 +30,10 @@ export function parseCellReference(cellRef: string): { row: number; col: number 
  * @param rangeRef - Range reference in A1 notation
  * @returns Object with start and end coordinates
  */
-export function parseRangeReference(rangeRef: string): { 
-  startRow: number; 
-  startCol: number; 
-  endRow: number; 
+export function parseRangeReference(rangeRef: string): {
+  startRow: number;
+  startCol: number;
+  endRow: number;
   endCol: number;
 } {
   const [startRef, endRef] = rangeRef.split(":");
@@ -47,7 +48,7 @@ export function parseRangeReference(rangeRef: string): {
     startRow: start.row,
     startCol: start.col,
     endRow: end.row,
-    endCol: end.col
+    endCol: end.col,
   };
 }
 
@@ -63,12 +64,12 @@ export function extractRangeFromData(data: any[][], range: string): any[][] {
   }
 
   const { startRow, startCol, endRow, endCol } = parseRangeReference(range);
-  
+
   // Extract the range
   const result: any[][] = [];
   for (let r = startRow; r <= endRow; r++) {
     if (r >= data.length) break;
-    
+
     const row: any[] = [];
     for (let c = startCol; c <= endCol; c++) {
       if (!data[r] || c >= data[r].length) {
@@ -102,7 +103,7 @@ export function extractColumnData(data: any[][], colRef: string): any[] {
   const colIndex = colNum - 1;
 
   // Extract the column data
-  return data.map(row => row[colIndex] || "");
+  return data.map((row) => row[colIndex] || "");
 }
 
 /**
@@ -141,11 +142,11 @@ export function extractTableData(
   }
 
   const start = parseCellReference(startCell);
-  
+
   // Detect table boundaries by looking for empty cells
   let endRow = start.row;
   let endCol = start.col;
-  
+
   // Find end row
   for (let r = start.row; r < data.length; r++) {
     if (!data[r] || !data[r][start.col] || data[r][start.col] === "") {
@@ -153,7 +154,7 @@ export function extractTableData(
     }
     endRow = r;
   }
-  
+
   // Find end column
   if (data[start.row]) {
     for (let c = start.col; c < (data[start.row].length || 0); c++) {
@@ -163,15 +164,15 @@ export function extractTableData(
       endCol = c;
     }
   }
-  
+
   // Extract headers and data
   const tableData: any[][] = [];
   let headers: string[] = [];
-  
+
   if (hasHeaders) {
     // Extract headers
     headers = data[start.row]?.slice(start.col, endCol + 1) || [];
-    
+
     // Extract data rows (skip header)
     for (let r = start.row + 1; r <= endRow; r++) {
       if (data[r]) {
@@ -180,10 +181,10 @@ export function extractTableData(
     }
   } else {
     // No headers, generate default ones (A, B, C...)
-    headers = Array.from({ length: endCol - start.col + 1 }, (_, i) => 
+    headers = Array.from({ length: endCol - start.col + 1 }, (_, i) =>
       String.fromCharCode(65 + i)
     );
-    
+
     // Extract all rows
     for (let r = start.row; r <= endRow; r++) {
       if (data[r]) {
@@ -191,7 +192,7 @@ export function extractTableData(
       }
     }
   }
-  
+
   return { headers, data: tableData };
 }
 
@@ -205,11 +206,11 @@ export function getMinimalSheetStructure(data: any[][]): any[][] {
   if (!data || !data.length) {
     return [[""]];
   }
-  
+
   // Get headers (first row) and a few sample rows (max 5)
   const headers = data[0] || [];
   const sampleRows = data.slice(1, Math.min(data.length, 6));
-  
+
   return [headers, ...sampleRows];
 }
 
@@ -223,23 +224,22 @@ export function findDataRanges(data: any[][], searchTerm: string): string[] {
   if (!data || !data.length) {
     return [];
   }
-  
+
   const ranges: string[] = [];
-  
+
   // Convert search term to lowercase for case-insensitive comparison
   const term = searchTerm.toString().toLowerCase();
-  
+
   for (let r = 0; r < data.length; r++) {
     for (let c = 0; c < (data[r]?.length || 0); c++) {
       const cellValue = data[r][c];
-      if (cellValue && 
-          cellValue.toString().toLowerCase().includes(term)) {
+      if (cellValue && cellValue.toString().toLowerCase().includes(term)) {
         const colLetter = String.fromCharCode(65 + c);
-        ranges.push(`${colLetter}${r+1}`);
+        ranges.push(`${colLetter}${r + 1}`);
       }
     }
   }
-  
+
   return ranges;
 }
 
@@ -256,63 +256,66 @@ export function analyzeDataStructure(data: any[][]): {
   columns: { label: string; index: number }[];
 } {
   if (!data || !data.length) {
-    return { 
-      rowCount: 0, 
-      colCount: 0, 
-      hasHeaders: false, 
-      tables: [], 
-      columns: [] 
+    return {
+      rowCount: 0,
+      colCount: 0,
+      hasHeaders: false,
+      tables: [],
+      columns: [],
     };
   }
-  
+
   const rowCount = data.length;
-  const colCount = Math.max(...data.map(row => row.length || 0));
-  
+  const colCount = Math.max(...data.map((row) => row.length || 0));
+
   // Try to detect if first row contains headers
-  const hasHeaders = data.length > 1 && data[0].some(cell => 
-    typeof cell === 'string' && cell !== '');
-  
+  const hasHeaders =
+    data.length > 1 &&
+    data[0].some((cell) => typeof cell === "string" && cell !== "");
+
   // Extract column information
-  const columns = hasHeaders 
-    ? data[0].map((header, idx) => ({ 
-        label: header?.toString() || String.fromCharCode(65 + idx), 
-        index: idx 
+  const columns = hasHeaders
+    ? data[0].map((header, idx) => ({
+        label: header?.toString() || String.fromCharCode(65 + idx),
+        index: idx,
       }))
-    : Array.from({ length: colCount }, (_, idx) => ({ 
-        label: String.fromCharCode(65 + idx), 
-        index: idx 
+    : Array.from({ length: colCount }, (_, idx) => ({
+        label: String.fromCharCode(65 + idx),
+        index: idx,
       }));
-  
+
   // Try to detect tables (continuous non-empty data)
   const tables: { range: string; headers: string[] }[] = [];
   let inTable = false;
   let tableStart = { row: 0, col: 0 };
-  
+
   for (let r = hasHeaders ? 1 : 0; r < data.length; r++) {
-    if (!inTable && data[r]?.some(cell => cell !== '')) {
+    if (!inTable && data[r]?.some((cell) => cell !== "")) {
       inTable = true;
       tableStart = { row: r, col: 0 };
-    } else if (inTable && !data[r]?.some(cell => cell !== '')) {
+    } else if (inTable && !data[r]?.some((cell) => cell !== "")) {
       // End of table
       const endRow = r - 1;
       const colLetter = String.fromCharCode(65 + tableStart.col);
       const startCell = `${colLetter}${tableStart.row + 1}`;
       const endColLetter = String.fromCharCode(65 + colCount - 1);
       const endCell = `${endColLetter}${endRow + 1}`;
-      
-      const tableHeaders = hasHeaders 
-        ? data[0].slice(tableStart.col, colCount) 
-        : Array.from({ length: colCount }, (_, i) => String.fromCharCode(65 + i));
-      
+
+      const tableHeaders = hasHeaders
+        ? data[0].slice(tableStart.col, colCount)
+        : Array.from({ length: colCount }, (_, i) =>
+            String.fromCharCode(65 + i)
+          );
+
       tables.push({
         range: `${startCell}:${endCell}`,
-        headers: tableHeaders
+        headers: tableHeaders,
       });
-      
+
       inTable = false;
     }
   }
-  
+
   // Check if we ended while still in a table
   if (inTable) {
     const endRow = data.length - 1;
@@ -320,22 +323,22 @@ export function analyzeDataStructure(data: any[][]): {
     const startCell = `${colLetter}${tableStart.row + 1}`;
     const endColLetter = String.fromCharCode(65 + colCount - 1);
     const endCell = `${endColLetter}${endRow + 1}`;
-    
-    const tableHeaders = hasHeaders 
-      ? data[0].slice(tableStart.col, colCount) 
+
+    const tableHeaders = hasHeaders
+      ? data[0].slice(tableStart.col, colCount)
       : Array.from({ length: colCount }, (_, i) => String.fromCharCode(65 + i));
-    
+
     tables.push({
       range: `${startCell}:${endCell}`,
-      headers: tableHeaders
+      headers: tableHeaders,
     });
   }
-  
+
   return {
     rowCount,
     colCount,
     hasHeaders,
     tables,
-    columns
+    columns,
   };
 }

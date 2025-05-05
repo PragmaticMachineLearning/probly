@@ -18,13 +18,15 @@ export interface TableConversionResult {
  * @param sampleMode - Whether to return only a sample of the data (first few rows)
  * @param maxSampleRows - Maximum number of sample rows to include
  * @param originalColumn - The original column letter if this is column data (e.g., 'E')
+ * @param startColumn - The starting column letter for range selections (e.g., 'F' for F2:G702)
  * @returns Formatted string with cell references
  */
 export function formatSpreadsheetData(
   data: any[][],
   sampleMode: boolean = false,
   maxSampleRows: number = 5,
-  originalColumn?: string
+  originalColumn?: string,
+  startColumn?: string
 ): string {
   if (!data || !Array.isArray(data)) return "";
 
@@ -39,6 +41,12 @@ export function formatSpreadsheetData(
   if (originalColumn && data[0]?.length === 1) {
     // This is extracted column data, use the original column reference
     columnRefs = [originalColumn];
+  } else if (startColumn) {
+    // For range selections, start from the provided column letter
+    const startCharCode = startColumn.charCodeAt(0);
+    columnRefs = Array.from({ length: maxColumns }, (_, i) =>
+      String.fromCharCode(startCharCode + i)
+    );
   } else {
     // Generate column references A, B, C...
     columnRefs = Array.from({ length: maxColumns }, (_, i) => getColumnRef(i));

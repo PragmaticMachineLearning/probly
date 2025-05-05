@@ -3,16 +3,21 @@ import {
   SYSTEM_MESSAGE,
 } from "@/constants/messages";
 import {
-  formatSpreadsheetData,
-  generateCellUpdates,
-  structureAnalysisOutput,
-} from "@/utils/analysisUtils";
+  formatSheetsContext,
+  formatSpreadsheetContext,
+  formatUserMessageContent,
+  handleCommonToolOperation,
+} from "@/utils/llmUtils";
+import {
+  handleCreateChartTool,
+  handleDataSelectionTool,
+  handleDocumentAnalysisTool,
+  handlePythonCodeTool,
+  handleSetSpreadsheetCellsTool,
+  handleStructureAnalysisTool,
+} from "@/utils/toolHandlers";
 
 import { OpenAI } from "openai";
-import { PyodideSandbox } from "@/utils/pyodideSandbox";
-import { analyzeDocumentWithVision } from "@/utils/analysisUtils";
-import { convertTableToCellUpdates } from "@/utils/analysisUtils";
-import { convertToCSV } from "@/utils/dataUtils";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
@@ -50,7 +55,6 @@ async function handleLLMRequest(
   columnReference?: string
 ): Promise<void> {
   let aborted = false;
-  let sandbox: PyodideSandbox | null = null;
 
   // Set up disconnect handler
   res.on("close", () => {
@@ -64,93 +68,29 @@ async function handleLLMRequest(
       ? DATA_SELECTION_SYSTEM_MESSAGE
       : SYSTEM_MESSAGE;
 
-    // Format context differently based on mode
-    let spreadsheetContext;
+    // Format context using our utility function
+    const spreadsheetContext = formatSpreadsheetContext(
+      spreadsheetData,
+      dataSelectionMode,
+      dataSelectionResult,
+      columnReference
+    );
 
-    if (dataSelectionMode) {
-      // For data selection phase, only include minimal structural info
-      // Format varies based on whether we have structured info or just sample data
-      console.log("IN DATA SELECTION MODE");
-      console.log("SPREADSHEET DATA", spreadsheetData);
-      if (
-        typeof spreadsheetData === "object" &&
-        spreadsheetData !== null &&
-        "structure" in spreadsheetData
-      ) {
-        // If we received pre-analyzed structure info
-        const structuredData = spreadsheetData as StructuredSpreadsheetData;
-        spreadsheetContext = `Spreadsheet Structure Information:
-Row Count: ${structuredData.structure.rowCount}
-Column Count: ${structuredData.structure.colCount}
-Has Headers: ${structuredData.structure.hasHeaders}
-
-Detected Tables:
-${structuredData.structure.tables
-  .map(
-    (table) => `- Range: ${table.range}, Headers: ${table.headers.join(", ")}`
-  )
-  .join("\n")}
-
-Columns:
-${structuredData.structure.columns
-  .map((col) => `- ${col.label} (index: ${col.index})`)
-  .join("\n")}`;
-      } else {
-        // Just use a sample of the data with the updated sampleMode parameter
-        spreadsheetContext = `Sample of spreadsheet data (first few rows):
-${formatSpreadsheetData(spreadsheetData, true, 10)}`; // Use sample mode with 10 rows
-      }
-    } else {
-      // For analysis phase (normal mode), format the actual data
-      // If we have a data selection result, mention it in the context
-      if (dataSelectionResult) {
-        if (
-          dataSelectionResult.dataSelection?.selectionType === "column" &&
-          columnReference
-        ) {
-          spreadsheetContext = `Selected data for analysis (${
-            dataSelectionResult.analysisType
-          } analysis):
-${formatSpreadsheetData(spreadsheetData, false, 0, columnReference)}
-
-Selection criteria: ${dataSelectionResult.explanation}`;
-        } else {
-          spreadsheetContext = `Selected data for analysis (${
-            dataSelectionResult.analysisType
-          } analysis):
-${formatSpreadsheetData(spreadsheetData)}
-
-Selection criteria: ${dataSelectionResult.explanation}`;
-        }
-      } else {
-        // Standard formatting for full data
-        spreadsheetContext = spreadsheetData?.length
-          ? `${formatSpreadsheetData(spreadsheetData)}\n`
-          : "";
-      }
-    }
     console.log("SPREADSHEET CONTEXT >>>", spreadsheetContext);
+
     // Add information about available sheets
-    const sheetsContext = sheetsInfo?.length
-      ? `Available sheets: ${sheetsInfo
-          .map((sheet) => sheet.name)
-          .join(", ")}\nActive sheet: ${activeSheetName}\n`
-      : "";
+    const sheetsContext = formatSheetsContext(sheetsInfo, activeSheetName);
 
     console.log("SPREADSHEET CONTEXT SIZE >>>", spreadsheetContext.length);
     console.log("SHEETS CONTEXT >>>", sheetsContext);
 
-    // Check if we have a document image
-    const hasDocumentImage = !!documentImage;
-
-    // Standard text-only message for the initial request
-    let userMessageContent = `${sheetsContext}${spreadsheetContext}User question: ${message}`;
-
-    // If document is provided, add context about it but don't use vision capabilities yet
-    if (hasDocumentImage) {
-      userMessageContent +=
-        "\n\nI've uploaded a document that needs to be analyzed.";
-    }
+    // Format user message content
+    const userMessageContent = formatUserMessageContent(
+      sheetsContext,
+      spreadsheetContext,
+      message,
+      documentImage
+    );
 
     // Format messages for OpenAI API
     const messages = [
@@ -202,266 +142,68 @@ Selection criteria: ${dataSelectionResult.explanation}`;
       };
 
       try {
-        // Handle the select_data_for_analysis tool with better error handling
-        if (toolCall.function.name === "select_data_for_analysis") {
+        // Handle tools using our utility functions
+        const functionName = toolCall.function.name;
+
+        if (functionName === "select_data_for_analysis") {
           if (aborted) return;
-
-          // Parse args with explicit error handling
-          let args;
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-            console.log("Data selection args:", JSON.stringify(args, null, 2));
-          } catch (parseError) {
-            console.error(
-              "Error parsing select_data_for_analysis arguments:",
-              parseError
-            );
-            console.log("Raw arguments:", toolCall.function.arguments);
-            args = {
-              analysisType: "custom",
-              dataSelection: { selectionType: "range", range: "A1:Z10" },
-              explanation: "Fallback after parsing error",
-            };
-          }
-
-          const { analysisType, dataSelection, explanation } = args;
-
-          // Validate required fields
-          if (!dataSelection || !dataSelection.selectionType) {
-            console.error("Missing required dataSelection fields:", args);
-            toolData = {
-              error: "Invalid data selection parameters",
-              response:
-                "I couldn't determine what data to analyze. Please try rephrasing your request.",
-            };
-          } else {
-            // This is the result of the data selection phase
-            // We'll return this to the client so it can request the specific data
-            toolData = {
-              dataSelectionResult: {
-                analysisType,
-                dataSelection,
-                explanation,
-              },
-              response: `I'll analyze your data using ${analysisType} analysis. ${explanation}`,
-            };
-            console.log(
-              "Generated dataSelectionResult:",
-              JSON.stringify(toolData.dataSelectionResult, null, 2)
-            );
-          }
-        } else if (toolCall.function.name === "analyze_spreadsheet_structure") {
+          toolData = await handleDataSelectionTool(toolCall);
+          console.log(
+            "Generated dataSelectionResult:",
+            JSON.stringify(toolData.dataSelectionResult, null, 2)
+          );
+        } else if (functionName === "analyze_spreadsheet_structure") {
           if (aborted) return;
-
-          // Parse args with explicit error handling
-          let args;
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-            console.log(
-              "Structure analysis args:",
-              JSON.stringify(args, null, 2)
-            );
-          } catch (parseError) {
-            console.error(
-              "Error parsing analyze_spreadsheet_structure arguments:",
-              parseError
-            );
-            console.log("Raw arguments:", toolCall.function.arguments);
-            args = {
-              scopeNeeded: "minimal",
-              explanation: "Fallback after parsing error",
-            };
-          }
-
-          const { scopeNeeded, explanation } = args;
-
-          toolData = {
-            structureAnalysisResult: {
-              scopeNeeded,
-              explanation,
-            },
-            response: `I'll analyze the spreadsheet structure to help answer your question. ${
-              explanation || ""
-            }`,
-          };
+          toolData = await handleStructureAnalysisTool(toolCall);
           console.log(
             "Generated structureAnalysisResult:",
             JSON.stringify(toolData.structureAnalysisResult, null, 2)
           );
-        } else if (toolCall.function.name === "set_spreadsheet_cells") {
+        } else if (functionName === "set_spreadsheet_cells") {
           if (aborted) return;
-          const updates = JSON.parse(toolCall.function.arguments).cellUpdates;
-          toolData.updates = updates;
-
-          toolData.response +=
-            "\n\nSpreadsheet Updates:\n" +
-            updates
-              .map((update: any) => `${update.target}: ${update.formula}`)
-              .join("\n");
-        } else if (toolCall.function.name === "create_chart") {
+          toolData = await handleSetSpreadsheetCellsTool(toolCall);
+        } else if (functionName === "create_chart") {
           if (aborted) return;
-          const args = JSON.parse(toolCall.function.arguments);
-          toolData.chartData = {
-            type: args.type,
-            options: { title: args.title, data: args.data },
-          };
-
-          toolData.response = `I've created a ${args.type} chart titled "${args.title}" based on your data.`;
-        } else if (toolCall.function.name === "execute_python_code") {
-          try {
-            if (aborted) return;
-            sandbox = new PyodideSandbox();
-            await sandbox.initialize();
-
-            const { analysis_goal, suggested_code, start_cell } = JSON.parse(
-              toolCall.function.arguments
-            );
-
-            if (aborted) {
-              await sandbox.destroy();
-              return;
-            }
-
-            const csvData = convertToCSV(spreadsheetData);
-            const result = await sandbox.runDataAnalysis(
-              suggested_code,
-              csvData
-            );
-
-            if (aborted) {
-              await sandbox.destroy();
-              return;
-            }
-
-            // Structure the output using LLM
-            const structuredOutput = await structureAnalysisOutput(
-              result.stdout,
-              analysis_goal
-            );
-
-            // Generate cell updates from structured output
-            const generatedUpdates = generateCellUpdates(
-              structuredOutput,
-              start_cell
-            );
-
-            // Create a more concise response message
-            const responseMessage = `I've analyzed your data: ${analysis_goal}`;
-
-            toolData = {
-              response: responseMessage,
-              updates: generatedUpdates.flat(), // Flatten the updates array
-            };
-          } catch (error) {
-            console.error("Error executing Python code:", error);
-            toolData = {
-              response: "An error occurred while executing the Python code.",
-            };
-          } finally {
-            if (sandbox) {
-              await sandbox.destroy();
-            }
-          }
-        } else if (toolCall.function.name === "get_sheet_info") {
+          toolData = await handleCreateChartTool(toolCall);
+        } else if (functionName === "execute_python_code") {
+          if (aborted) return;
+          toolData = await handlePythonCodeTool(toolCall, spreadsheetData);
+        } else if (
+          functionName === "get_sheet_info" ||
+          functionName === "rename_sheet" ||
+          functionName === "clear_sheet" ||
+          functionName === "add_sheet" ||
+          functionName === "remove_sheet"
+        ) {
           if (aborted) return;
 
-          toolData.response = `Current sheets: ${sheetsInfo
-            .map((sheet) => sheet.name)
-            .join(", ")}\nActive sheet: ${activeSheetName}`;
-        } else if (toolCall.function.name === "rename_sheet") {
-          if (aborted) return;
+          // Handle common sheet operations
+          const commonOpResult = handleCommonToolOperation(
+            toolCall,
+            activeSheetName
+          );
+          if (commonOpResult) {
+            const { type, data } = commonOpResult;
 
-          const args = JSON.parse(toolCall.function.arguments);
-          const { currentName, newName } = args;
-
-          toolData.sheetOperation = {
-            type: "rename",
-            currentName: currentName,
-            newName: newName,
-          };
-
-          toolData.response = `I've renamed the sheet "${currentName}" to "${newName}".`;
-        } else if (toolCall.function.name === "clear_sheet") {
-          if (aborted) return;
-
-          const args = JSON.parse(toolCall.function.arguments);
-          const sheetName = args.sheetName || activeSheetName;
-
-          toolData.sheetOperation = {
-            type: "clear",
-            sheetName: sheetName,
-          };
-
-          toolData.response = `I've cleared all data from the sheet "${sheetName}".`;
-        } else if (toolCall.function.name === "add_sheet") {
-          if (aborted) return;
-
-          const args = JSON.parse(toolCall.function.arguments);
-          const sheetName = args.sheetName || "New Sheet";
-
-          toolData.sheetOperation = {
-            type: "add",
-            sheetName: sheetName,
-          };
-
-          toolData.response = `I've added a new sheet named "${sheetName}".`;
-        } else if (toolCall.function.name === "remove_sheet") {
-          if (aborted) return;
-
-          const args = JSON.parse(toolCall.function.arguments);
-          const sheetName = args.sheetName || activeSheetName;
-          toolData.sheetOperation = {
-            type: "remove",
-            sheetName: sheetName,
-          };
-
-          toolData.response = `I've removed the sheet "${sheetName}".`;
-        } else if (toolCall.function.name === "document_analysis") {
-          if (aborted) return;
-
-          const args = JSON.parse(toolCall.function.arguments);
-          const { operation, target_sheet, start_cell } = args;
-
-          // We need the document image for analysis
-          if (!documentImage) {
-            toolData.response =
-              "Error: No document image provided for analysis.";
-          } else {
-            try {
-              // Get table data directly from vision API
-              const tableData = await analyzeDocumentWithVision(
-                operation,
-                documentImage
-              );
-
-              // Generate cell updates using the standardized function
-              const updates = convertTableToCellUpdates(
-                tableData,
-                start_cell,
-                target_sheet || activeSheetName
-              );
-
-              // Include note from table conversion if available
-              const noteText = tableData.note
-                ? `\n\nNote: ${tableData.note}`
-                : "";
-
-              toolData = {
-                response: `Successfully extracted data using ${operation.replace(
-                  "_",
-                  " "
-                )}. The data has been placed in your spreadsheet${
-                  start_cell ? ` starting at cell ${start_cell}` : ""
-                }.${noteText}`,
-                updates: updates,
+            if (type === "get_sheet_info") {
+              toolData.response = `Current sheets: ${sheetsInfo
+                .map((sheet) => sheet.name)
+                .join(", ")}\nActive sheet: ${activeSheetName}`;
+            } else {
+              toolData.sheetOperation = {
+                type,
+                ...data,
               };
-            } catch (error: any) {
-              console.error("Error processing document:", error);
-              toolData.response = `Error processing document: ${
-                error.message || "Unknown error"
-              }`;
+              toolData.response = data.response;
             }
           }
+        } else if (functionName === "document_analysis") {
+          if (aborted) return;
+          toolData = await handleDocumentAnalysisTool(
+            toolCall,
+            documentImage || "",
+            activeSheetName
+          );
         }
       } catch (toolError) {
         console.error(
@@ -503,11 +245,6 @@ Selection criteria: ${dataSelectionResult.explanation}`;
           error: error.message || "Unknown error",
         })}\n\n`
       );
-    }
-  } finally {
-    // Ensure sandbox is destroyed if it exists
-    if (sandbox) {
-      await sandbox.destroy();
     }
   }
 }
