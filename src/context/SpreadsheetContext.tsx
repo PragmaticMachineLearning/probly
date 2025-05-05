@@ -8,6 +8,15 @@ import {
   setActiveHyperFormulaSheet,
   updateHyperFormulaSheetData
 } from "@/lib/file/spreadsheet/config";
+import {
+  analyzeDataStructure,
+  extractColumnData,
+  extractRangeFromData,
+  extractRowData,
+  extractTableData,
+  findDataRanges,
+  getMinimalSheetStructure
+} from "@/utils/preprocess";
 
 import { CellUpdate } from "@/types/api";
 import { db } from "@/lib/db";
@@ -41,6 +50,14 @@ interface SpreadsheetContextType {
   getActiveSheetData: () => any[][];
   getActiveSheetName: () => string;
   getSheetByName: (name: string) => Sheet | undefined;
+  // New data processing methods
+  getDataRange: (range: string) => any[][];
+  getColumnData: (column: string) => any[];
+  getRowData: (row: number) => any[];
+  getTableData: (startCell: string, hasHeaders?: boolean) => { headers: string[]; data: any[][] };
+  getMinimalStructure: () => any[][];
+  analyzeActiveSheetStructure: () => any;
+  findRangesWithTerm: (searchTerm: string) => string[];
 }
 
 const SpreadsheetContext = createContext<SpreadsheetContextType | undefined>(
@@ -610,6 +627,64 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
     return sheets.find(sheet => sheet.name === name);
   };
 
+  const getDataRange = (range: string): any[][] => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return [[""]];
+    
+    return extractRangeFromData(activeSheet.data, range);
+  };
+
+  const getColumnData = (column: string): any[] => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return [""];
+    
+    return extractColumnData(activeSheet.data, column);
+  };
+
+  const getRowData = (row: number): any[] => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return [""];
+    
+    return extractRowData(activeSheet.data, row);
+  };
+
+  const getTableData = (
+    startCell: string, 
+    hasHeaders: boolean = true
+  ): { headers: string[]; data: any[][] } => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return { headers: [], data: [[""]] };
+    
+    return extractTableData(activeSheet.data, startCell, hasHeaders);
+  };
+
+  const getMinimalStructure = (): any[][] => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return [[""]];
+    
+    return getMinimalSheetStructure(activeSheet.data);
+  };
+
+  const analyzeActiveSheetStructure = () => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return {
+      rowCount: 0,
+      colCount: 0,
+      hasHeaders: false,
+      tables: [],
+      columns: []
+    };
+    
+    return analyzeDataStructure(activeSheet.data);
+  };
+
+  const findRangesWithTerm = (searchTerm: string): string[] => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) return [];
+    
+    return findDataRanges(activeSheet.data, searchTerm);
+  };
+
   // Show loading state if still loading data from IndexedDB
   if (isLoading) {
     return <div>Loading spreadsheet data...</div>;
@@ -638,6 +713,14 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
         getActiveSheetData,
         getActiveSheetName,
         getSheetByName,
+        // New data processing methods
+        getDataRange,
+        getColumnData,
+        getRowData,
+        getTableData,
+        getMinimalStructure,
+        analyzeActiveSheetStructure,
+        findRangesWithTerm,
       }}
     >
       {children}

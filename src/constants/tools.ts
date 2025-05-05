@@ -24,10 +24,11 @@ export const tools: FunctionTool[] = [
               properties: {
                 formula: { type: "string" },
                 target: { type: "string" },
-                sheetName: { 
+                sheetName: {
                   type: "string",
-                  description: "Optional. The name of the sheet to update. If not provided, the active sheet will be used."
-                }
+                  description:
+                    "Optional. The name of the sheet to update. If not provided, the active sheet will be used.",
+                },
               },
               required: ["formula", "target"],
               additionalProperties: false,
@@ -35,6 +36,102 @@ export const tools: FunctionTool[] = [
           },
         },
         required: ["cellUpdates"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "select_data_for_analysis",
+      description:
+        "Select the most relevant data for analysis based on the user query",
+      parameters: {
+        type: "object",
+        properties: {
+          analysisType: {
+            type: "string",
+            enum: [
+              "statistical",
+              "trend",
+              "summary",
+              "forecast",
+              "comparison",
+              "custom",
+            ],
+            description: "The type of analysis that needs to be performed",
+          },
+          dataSelection: {
+            type: "object",
+            properties: {
+              selectionType: {
+                type: "string",
+                enum: ["range", "column", "row", "table", "search"],
+                description: "The type of data selection to perform",
+              },
+              range: {
+                type: "string",
+                description:
+                  "A cell range in A1 notation (e.g., 'A1:C10'). Required if selectionType is 'range'.",
+              },
+              column: {
+                type: "string",
+                description:
+                  "Column reference (e.g., 'A'). Required if selectionType is 'column'.",
+              },
+              row: {
+                type: "number",
+                description:
+                  "Row number (1-based). Required if selectionType is 'row'.",
+              },
+              tableStartCell: {
+                type: "string",
+                description:
+                  "Top-left cell of the table in A1 notation. Required if selectionType is 'table'.",
+              },
+              hasHeaders: {
+                type: "boolean",
+                description:
+                  "Whether the table has headers. Only relevant if selectionType is 'table'.",
+              },
+              searchTerm: {
+                type: "string",
+                description:
+                  "Term to search for in the spreadsheet. Required if selectionType is 'search'.",
+              },
+            },
+            required: ["selectionType"],
+          },
+          explanation: {
+            type: "string",
+            description:
+              "Explanation of why this data selection is relevant to the user's query",
+          },
+        },
+        required: ["analysisType", "dataSelection", "explanation"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "analyze_spreadsheet_structure",
+      description:
+        "Analyze the structure of the active spreadsheet to identify relevant data for the user's query",
+      parameters: {
+        type: "object",
+        properties: {
+          scopeNeeded: {
+            type: "string",
+            enum: ["full", "minimal", "auto"],
+            description:
+              "The scope of analysis needed to answer the user's query",
+          },
+          explanation: {
+            type: "string",
+            description: "Explanation of why this type of analysis is needed",
+          },
+        },
+        required: ["scopeNeeded"],
       },
     },
   },
@@ -69,8 +166,9 @@ export const tools: FunctionTool[] = [
           },
           sheetName: {
             type: "string",
-            description: "Optional. The name of the sheet the data is from. For reference only."
-          }
+            description:
+              "Optional. The name of the sheet the data is from. For reference only.",
+          },
         },
         required: ["type", "title", "data"],
       },
@@ -100,8 +198,9 @@ export const tools: FunctionTool[] = [
           },
           sheetName: {
             type: "string",
-            description: "Optional. The name of the sheet to place results. If not provided, the active sheet will be used."
-          }
+            description:
+              "Optional. The name of the sheet to place results. If not provided, the active sheet will be used.",
+          },
         },
         required: ["analysis_goal", "suggested_code", "start_cell"],
       },
@@ -111,7 +210,8 @@ export const tools: FunctionTool[] = [
     type: "function",
     function: {
       name: "get_sheet_info",
-      description: "Get information about available sheets and the active sheet",
+      description:
+        "Get information about available sheets and the active sheet",
       parameters: {
         type: "object",
         properties: {},
@@ -129,11 +229,11 @@ export const tools: FunctionTool[] = [
         properties: {
           sheetName: {
             type: "string",
-            description: "The name of the new sheet to add"
-          }
+            description: "The name of the new sheet to add",
+          },
         },
-      }
-    }
+      },
+    },
   },
   {
     type: "function",
@@ -145,14 +245,14 @@ export const tools: FunctionTool[] = [
         properties: {
           sheetName: {
             type: "string",
-            description: "The name of the sheet to remove"
-          }
+            description: "The name of the sheet to remove",
+          },
         },
-        required: ["sheetName"]
-      }
-    }
+        required: ["sheetName"],
+      },
+    },
   },
-  
+
   {
     type: "function",
     function: {
@@ -163,16 +263,16 @@ export const tools: FunctionTool[] = [
         properties: {
           currentName: {
             type: "string",
-            description: "The current name of the sheet to rename"
+            description: "The current name of the sheet to rename",
           },
           newName: {
             type: "string",
-            description: "The new name for the sheet"
-          }
+            description: "The new name for the sheet",
+          },
         },
-        required: ["currentName", "newName"]
-      }
-    }
+        required: ["currentName", "newName"],
+      },
+    },
   },
   {
     type: "function",
@@ -184,37 +284,48 @@ export const tools: FunctionTool[] = [
         properties: {
           sheetName: {
             type: "string",
-            description: "The name of the sheet to clear. If not provided, the active sheet will be cleared."
-          }
+            description:
+              "The name of the sheet to clear. If not provided, the active sheet will be cleared.",
+          },
         },
-        required: []
-      }
-    }
+        required: [],
+      },
+    },
   },
   {
     type: "function",
     function: {
       name: "document_analysis",
-      description: "Extract and analyze information from uploaded documents like receipts, invoices, tables, etc.",
+      description:
+        "Extract and analyze information from uploaded documents like receipts, invoices, tables, etc.",
       parameters: {
         type: "object",
         properties: {
           operation: {
             type: "string",
-            enum: ["extract_data", "extract_text", "extract_table", "analyze_receipt", "analyze_invoice"],
-            description: "The type of extraction or analysis to perform on the document"
+            enum: [
+              "extract_data",
+              "extract_text",
+              "extract_table",
+              "analyze_receipt",
+              "analyze_invoice",
+            ],
+            description:
+              "The type of extraction or analysis to perform on the document",
           },
           target_sheet: {
-            type: "string", 
-            description: "Optional. The name of the sheet where extracted data should be placed. If not provided, the active sheet will be used."
+            type: "string",
+            description:
+              "Optional. The name of the sheet where extracted data should be placed. If not provided, the active sheet will be used.",
           },
           start_cell: {
             type: "string",
-            description: "The cell reference (e.g., 'A1') where extracted data should start. If not provided, data will be placed in an appropriate location."
-          }
+            description:
+              "The cell reference (e.g., 'A1') where extracted data should start. If not provided, data will be placed in an appropriate location.",
+          },
         },
-        required: ["operation", "start_cell"]
-      }
-    }
-  }
+        required: ["operation", "start_cell"],
+      },
+    },
+  },
 ];
