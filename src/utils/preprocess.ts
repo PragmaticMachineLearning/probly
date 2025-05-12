@@ -342,3 +342,287 @@ export function analyzeDataStructure(data: any[][]): {
     columns,
   };
 }
+
+type DataRegion = {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+  type: "table" | "list" | "scattered";
+  hasHeaders: boolean;
+  headers?: string[];
+  rowCount: number;
+  colCount: number;
+  density: number;
+};
+
+/**
+ * Get comprehensive metadata about the spreadsheet structure and data occupancy
+ * @param data - Full sheet data
+ * @returns Object containing detailed metadata about the spreadsheet
+ */
+export function getSpreadsheetMetadata(data: any[][]): {
+  dimensions: {
+    rowCount: number;
+    colCount: number;
+    usedRowCount: number;
+    usedColCount: number;
+  };
+  dataRegions: DataRegion[];
+  columnStats: {
+    index: number;
+    label: string;
+    nonEmptyCount: number;
+    dataTypes: Record<string, number>;
+    sampleValues: any[];
+  }[];
+  rowStats: {
+    index: number;
+    nonEmptyCount: number;
+    dataTypes: Record<string, number>;
+  }[];
+  overallStats: {
+    totalCells: number;
+    nonEmptyCells: number;
+    dataDensity: number;
+    dataTypes: Record<string, number>;
+  };
+} {
+  if (!data || !data.length) {
+    return {
+      dimensions: {
+        rowCount: 0,
+        colCount: 0,
+        usedRowCount: 0,
+        usedColCount: 0,
+      },
+      dataRegions: [],
+      columnStats: [],
+      rowStats: [],
+      overallStats: {
+        totalCells: 0,
+        nonEmptyCells: 0,
+        dataDensity: 0,
+        dataTypes: {},
+      },
+    };
+  }
+
+  // Get base structure analysis
+  const baseAnalysis = analyzeDataStructure(data);
+
+  // Helper function to determine data type
+  const getDataType = (value: any): string => {
+    if (value === null || value === undefined || value === "") return "empty";
+    if (typeof value === "number") return "number";
+    if (typeof value === "boolean") return "boolean";
+    if (value instanceof Date) return "date";
+    if (typeof value === "string") {
+      // Check for date strings
+      if (!isNaN(Date.parse(value))) return "date";
+      // Check for number strings
+      if (!isNaN(Number(value))) return "number";
+      return "string";
+    }
+    return "other";
+  };
+
+  // Calculate dimensions
+  const rowCount = baseAnalysis.rowCount;
+  const colCount = baseAnalysis.colCount;
+
+  // Find used dimensions
+  let usedRowCount = 0;
+  let usedColCount = 0;
+  const rowHasData = new Array(rowCount).fill(false);
+  const colHasData = new Array(colCount).fill(false);
+
+  // Initialize statistics objects
+  const columnStats = Array.from({ length: colCount }, (_, i) => ({
+    index: i,
+    label: baseAnalysis.columns[i]?.label || String.fromCharCode(65 + i),
+    nonEmptyCount: 0,
+    dataTypes: {} as Record<string, number>,
+    sampleValues: [] as any[],
+  }));
+  const rowStats = Array.from({ length: rowCount }, (_, i) => ({
+    index: i,
+    nonEmptyCount: 0,
+    dataTypes: {} as Record<string, number>,
+  }));
+  const overallStats = {
+    totalCells: rowCount * colCount,
+    nonEmptyCells: 0,
+    dataDensity: 0,
+    dataTypes: {} as Record<string, number>,
+  };
+
+  // First pass: collect basic statistics
+  for (let r = 0; r < rowCount; r++) {
+    for (let c = 0; c < colCount; c++) {
+      const value = data[r]?.[c];
+      if (value !== null && value !== undefined && value !== "") {
+        const dataType = getDataType(value);
+
+        // Update column stats
+        columnStats[c].nonEmptyCount++;
+        columnStats[c].dataTypes[dataType] =
+          (columnStats[c].dataTypes[dataType] || 0) + 1;
+        if (columnStats[c].sampleValues.length < 3) {
+          columnStats[c].sampleValues.push(value);
+        }
+
+        // Update row stats
+        rowStats[r].nonEmptyCount++;
+        rowStats[r].dataTypes[dataType] =
+          (rowStats[r].dataTypes[dataType] || 0) + 1;
+
+        // Update overall stats
+        overallStats.nonEmptyCells++;
+        overallStats.dataTypes[dataType] =
+          (overallStats.dataTypes[dataType] || 0) + 1;
+
+        // Mark rows and columns as used
+        rowHasData[r] = true;
+        colHasData[c] = true;
+      }
+    }
+  }
+
+  // Calculate used dimensions
+  usedRowCount = rowHasData.filter(Boolean).length;
+  usedColCount = colHasData.filter(Boolean).length;
+  overallStats.dataDensity =
+    (overallStats.nonEmptyCells / overallStats.totalCells) * 100;
+
+  // Convert base analysis tables into data regions
+  const dataRegions: DataRegion[] = baseAnalysis.tables.map((table) => {
+    const { startRow, startCol, endRow, endCol } = parseRangeReference(
+      table.range
+    );
+    const regionRowCount = endRow - startRow + 1;
+    const regionColCount = endCol - startCol + 1;
+
+    // Calculate density for this region
+    let nonEmptyCells = 0;
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        if (
+          data[r]?.[c] !== null &&
+          data[r]?.[c] !== undefined &&
+          data[r]?.[c] !== ""
+        ) {
+          nonEmptyCells++;
+        }
+      }
+    }
+    const density = (nonEmptyCells / (regionRowCount * regionColCount)) * 100;
+
+    return {
+      startRow,
+      startCol,
+      endRow,
+      endCol,
+      type: "table",
+      hasHeaders: baseAnalysis.hasHeaders,
+      headers: table.headers,
+      rowCount: regionRowCount,
+      colCount: regionColCount,
+      density,
+    };
+  });
+
+  // Add any remaining data regions that weren't identified as tables
+  const processedCells = new Set<string>();
+  dataRegions.forEach((region) => {
+    for (let r = region.startRow; r <= region.endRow; r++) {
+      for (let c = region.startCol; c <= region.endCol; c++) {
+        processedCells.add(`${r},${c}`);
+      }
+    }
+  });
+
+  // Look for unprocessed data regions
+  for (let r = 0; r < rowCount; r++) {
+    for (let c = 0; c < colCount; c++) {
+      if (
+        !processedCells.has(`${r},${c}`) &&
+        data[r]?.[c] !== null &&
+        data[r]?.[c] !== undefined &&
+        data[r]?.[c] !== ""
+      ) {
+        // Start of a new region
+        let endRow = r;
+        let endCol = c;
+        let nonEmptyCells = 1;
+
+        // Extend region
+        while (
+          endRow + 1 < rowCount &&
+          data[endRow + 1]?.[c] !== null &&
+          data[endRow + 1]?.[c] !== undefined &&
+          data[endRow + 1]?.[c] !== ""
+        ) {
+          endRow++;
+          nonEmptyCells++;
+        }
+        while (
+          endCol + 1 < colCount &&
+          data[r]?.[endCol + 1] !== null &&
+          data[r]?.[endCol + 1] !== undefined &&
+          data[r]?.[endCol + 1] !== ""
+        ) {
+          endCol++;
+          nonEmptyCells++;
+        }
+
+        // Mark cells as processed
+        for (let rr = r; rr <= endRow; rr++) {
+          for (let cc = c; cc <= endCol; cc++) {
+            processedCells.add(`${rr},${cc}`);
+          }
+        }
+
+        const regionRowCount = endRow - r + 1;
+        const regionColCount = endCol - c + 1;
+        const density =
+          (nonEmptyCells / (regionRowCount * regionColCount)) * 100;
+
+        // Determine region type
+        let regionType: "table" | "list" | "scattered";
+        if (regionRowCount > 1 && regionColCount > 1) {
+          regionType = "table";
+        } else if (regionRowCount > 1) {
+          regionType = "list";
+        } else {
+          regionType = "scattered";
+        }
+
+        dataRegions.push({
+          startRow: r,
+          startCol: c,
+          endRow,
+          endCol,
+          type: regionType,
+          hasHeaders: false,
+          rowCount: regionRowCount,
+          colCount: regionColCount,
+          density,
+        });
+      }
+    }
+  }
+
+  return {
+    dimensions: {
+      rowCount,
+      colCount,
+      usedRowCount,
+      usedColCount,
+    },
+    dataRegions,
+    columnStats,
+    rowStats,
+    overallStats,
+  };
+}

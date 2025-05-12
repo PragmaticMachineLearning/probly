@@ -69,7 +69,8 @@ const SpreadsheetApp = () => {
     getTableData,
     getMinimalStructure,
     analyzeActiveSheetStructure,
-    findRangesWithTerm
+    findRangesWithTerm,
+    SpreadsheetMetadata
   } = useSpreadsheet();
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -169,7 +170,6 @@ const SpreadsheetApp = () => {
       response: "",
       timestamp: new Date(),
       status: "pending",
-      // If an image was uploaded, store this info in the message
       hasImage: !!documentImage,
       documentImage: documentImage
     };
@@ -187,21 +187,24 @@ const SpreadsheetApp = () => {
       // PHASE 1: Data Selection
       // First, analyze the spreadsheet structure to determine what data is needed
       const structureInfo = analyzeActiveSheetStructure();
+      const metadata = SpreadsheetMetadata();
       
       console.log("Starting data selection phase...");
       
-      const selectionResponse = await fetch("/api/llm", {
+      const response = await fetch("/api/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          // Send spreadsheet structure instead of full data
-          spreadsheetData: { structure: structureInfo },
+          // Send spreadsheet structure and metadata instead of full data
+          spreadsheetData: { 
+            structure: structureInfo,
+            metadata 
+          },
           activeSheetName: activeSheetName,
           sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
           chatHistory: formattedHistory,
           documentImage: documentImage,
-          dataSelectionMode: true, // Signal this is the data selection phase
         }),
         signal: abortController.current.signal,
       });
@@ -210,57 +213,47 @@ const SpreadsheetApp = () => {
         throw new Error("AbortError");
       }
       
-      // Add additional logic for data selection phase handling and fallback
-      // Process the data selection response with better error handling
-      let selectionTimeout: NodeJS.Timeout | null = null;
-      const selectionPromise = new Promise<any>(async (resolve, reject) => {
-        // Set a timeout to avoid waiting too long for the selection phase
-        selectionTimeout = setTimeout(() => {
-          console.log("Data selection phase timed out, using fallback");
+      // Process the response with better error handling
+      let timeout: NodeJS.Timeout | null = null;
+      const promise = new Promise<any>(async (resolve, reject) => {
+        // Set a timeout to avoid waiting too long
+        timeout = setTimeout(() => {
+          console.log("Request timed out");
           resolve({
             fallback: true,
-            dataSelection: {
-              selectionType: "range",
-              range: "A1:Z20" // Default to first 20 rows
-            },
-            analysisType: "summary",
-            explanation: "Using fallback selection due to timeout"
+            response: "Request timed out. Please try again with a simpler request.",
           });
-        }, 15000); // 15 second timeout
+        }, 30000); // 30 second timeout
         
         try {
-          // Process the data selection response
-          const selectionReader = selectionResponse.body?.getReader();
-          if (!selectionReader) {
-            throw new Error("Could not read selection response stream.");
+          // Process the response
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error("Could not read response stream.");
           }
           
           // Variables to accumulate partial JSON chunks
-          let selectionChunk = "";
-          let dataSelectionResult: any = null;
+          let chunk = "";
+          let result: any = null;
           
           while (true) {
-            const { done, value } = await selectionReader.read();
+            const { done, value } = await reader.read();
             if (done) break;
             
-            selectionChunk += new TextDecoder().decode(value);
-            console.log("selectionChunk", selectionChunk);
+            chunk += new TextDecoder().decode(value);
             
             // Try to extract complete event chunks
-            const events = selectionChunk.split("\n\n").filter(Boolean);
-            console.log("events count:", events.length);
+            const events = chunk.split("\n\n").filter(Boolean);
             
             // Process complete events
             for (const event of events) {
               if (event.startsWith("data: ")) {
                 try {
                   const jsonData = JSON.parse(event.substring(6));
-                  console.log("Parsed selection data:", JSON.stringify(jsonData, null, 2));
                   
-                  // Check if we have a data selection result
+                  // Handle any tool response
                   if (jsonData.dataSelectionResult) {
-                    dataSelectionResult = jsonData.dataSelectionResult;
-                    console.log("Found dataSelectionResult:", JSON.stringify(dataSelectionResult, null, 2));
+                    result = jsonData.dataSelectionResult;
                     
                     // Update the chat message with the initial response
                     setChatHistory((prev) =>
@@ -268,94 +261,184 @@ const SpreadsheetApp = () => {
                         msg.id === newMessage.id
                           ? {
                               ...msg,
-                              response: `Analyzing your data using ${dataSelectionResult.analysisType} analysis...`,
+                              response: `Analyzing your data using ${result.analysisType} analysis...`,
                             }
                           : msg
                       )
                     );
                     
                     // Clear the timeout and resolve with the result
-                    if (selectionTimeout) {
-                      clearTimeout(selectionTimeout);
-                      selectionTimeout = null;
+                    if (timeout) {
+                      clearTimeout(timeout);
+                      timeout = null;
                     }
-                    resolve(dataSelectionResult);
+                    resolve(result);
                     return;
-                  } else if (jsonData.structureAnalysisResult) {
-                    // Handle structure analysis result
-                    const { scopeNeeded } = jsonData.structureAnalysisResult;
-                    console.log("Found structureAnalysisResult with scope:", scopeNeeded);
+                  } else if (jsonData.updates) {
+                    // Handle spreadsheet updates
+                    result = {
+                      updates: jsonData.updates,
+                      response: jsonData.response
+                    };
                     
-                    // Continue processing - we're looking for dataSelectionResult
+                    // Update the chat message with the response
+                    setChatHistory((prev) =>
+                      prev.map((msg) =>
+                        msg.id === newMessage.id
+                          ? {
+                              ...msg,
+                              response: jsonData.response,
+                              updates: jsonData.updates,
+                              status: "completed"
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    // Clear the timeout and resolve with the result
+                    if (timeout) {
+                      clearTimeout(timeout);
+                      timeout = null;
+                    }
+                    resolve(result);
+                    return;
+                  } else if (jsonData.chartData) {
+                    // Handle chart data
+                    result = {
+                      chartData: jsonData.chartData,
+                      response: jsonData.response
+                    };
+                    
+                    // Update the chat message with the response
+                    setChatHistory((prev) =>
+                      prev.map((msg) =>
+                        msg.id === newMessage.id
+                          ? {
+                              ...msg,
+                              response: jsonData.response,
+                              chartData: jsonData.chartData,
+                              status: "completed"
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    // Clear the timeout and resolve with the result
+                    if (timeout) {
+                      clearTimeout(timeout);
+                      timeout = null;
+                    }
+                    resolve(result);
+                    return;
+                  } else if (jsonData.sheetOperation) {
+                    // Handle sheet operations
+                    result = {
+                      sheetOperation: jsonData.sheetOperation,
+                      response: jsonData.response
+                    };
+                    
+                    // Update the chat message with the response
+                    setChatHistory((prev) =>
+                      prev.map((msg) =>
+                        msg.id === newMessage.id
+                          ? {
+                              ...msg,
+                              response: jsonData.response,
+                              status: "completed"
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    // Clear the timeout and resolve with the result
+                    if (timeout) {
+                      clearTimeout(timeout);
+                      timeout = null;
+                    }
+                    resolve(result);
+                    return;
                   } else if (jsonData.error) {
-                    console.error("Error in selection phase:", jsonData.error);
+                    console.error("Error in response:", jsonData.error);
                     throw new Error(jsonData.error);
-                  } else {
-                    console.log("No selection result found in response, got:", Object.keys(jsonData));
+                  } else if (jsonData.response) {
+                    // Handle simple text response
+                    result = {
+                      response: jsonData.response
+                    };
+                    
+                    // Update the chat message with the response
+                    setChatHistory((prev) =>
+                      prev.map((msg) =>
+                        msg.id === newMessage.id
+                          ? {
+                              ...msg,
+                              response: jsonData.response,
+                              status: "completed"
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    // Clear the timeout and resolve with the result
+                    if (timeout) {
+                      clearTimeout(timeout);
+                      timeout = null;
+                    }
+                    resolve(result);
+                    return;
                   }
                 } catch (e) {
-                  console.error("Error parsing selection SSE data:", e);
+                  console.error("Error parsing SSE data:", e);
                   // Continue to next event - this one might be partial
                 }
               }
             }
             
             // Remove processed events from the chunk
-            const lastEventIndex = selectionChunk.lastIndexOf("\n\n");
+            const lastEventIndex = chunk.lastIndexOf("\n\n");
             if (lastEventIndex >= 0) {
-              selectionChunk = selectionChunk.substring(lastEventIndex + 2);
+              chunk = chunk.substring(lastEventIndex + 2);
             }
           }
           
           // If we get here without resolving, use a fallback
-          console.log("Data selection phase completed without finding selection result, using fallback");
+          console.log("Request completed without finding a valid response, using fallback");
           resolve({
             fallback: true,
-            dataSelection: {
-              selectionType: "range",
-              range: "A1:Z20" // Default to first 20 rows
-            },
-            analysisType: "summary",
-            explanation: "Using fallback selection due to no selection result"
+            response: "Could not process the response. Please try again with a more specific request.",
           });
         } catch (error) {
-          console.error("Error in data selection phase:", error);
+          console.error("Error in request:", error);
           
-          // If there's an error, use a fallback selection
-          if (selectionTimeout) {
-            clearTimeout(selectionTimeout);
-            selectionTimeout = null;
+          // If there's an error, use a fallback
+          if (timeout) {
+            clearTimeout(timeout);
+            timeout = null;
           }
           
           // Resolve with fallback rather than rejecting
           resolve({
             fallback: true,
-            dataSelection: {
-              selectionType: "range",
-              range: "A1:Z20" // Default to first 20 rows
-            },
-            analysisType: "summary",
-            explanation: "Using fallback selection due to error"
+            response: "An error occurred while processing your request. Please try again.",
           });
         }
       });
 
-      // Wait for the selection phase and get the result
-      const dataSelectionResult = await selectionPromise;
+      // Wait for the response and get the result
+      const result = await promise;
 
-      // If aborted during the data selection phase
+      // If aborted during the request
       if (abortController.current.signal.aborted) {
         throw new Error("AbortError");
       }
       
-      // PHASE 2: Data Analysis with Selected Data
-      // Now that we know what data is needed, get only that specific data
-      let relevantData: any[][] = getActiveSheetData(); // Default to full data
-      
-      let columnReference: string | undefined;
-      
-      if (dataSelectionResult) {
-        const { analysisType, dataSelection, explanation, fallback } = dataSelectionResult;
+      // Only proceed with data selection if we got a data selection result
+      if (result && result.dataSelection) {
+        // Now send the actual analysis request with only the relevant data
+        let relevantData: any[][] = getActiveSheetData(); // Default to full data
+        let columnReference: string | undefined;
+        
+        const { analysisType, dataSelection, explanation, fallback } = result;
         console.log(`Data selection result: ${analysisType} analysis with ${dataSelection.selectionType}${fallback ? " (fallback)" : ""}`);
         console.log("Full selection details:", JSON.stringify(dataSelection, null, 2));
         
@@ -369,20 +452,15 @@ const SpreadsheetApp = () => {
             break;
           case "column":
             if (dataSelection.column) {
-              // Convert column data to 2D array for consistency
               console.log(`Getting column data: ${dataSelection.column}`);
               const columnData = getColumnData(dataSelection.column);
               console.log(`Column data length: ${columnData.length}`);
-              
-              // Save the original column reference to pass through to the API
               relevantData = columnData.map((cell: any) => [cell]);
-              // Also store the original column name in the API request
               columnReference = dataSelection.column;
             }
             break;
           case "row":
             if (dataSelection.row) {
-              // Convert row data to 2D array for consistency
               console.log(`Getting row data: ${dataSelection.row}`);
               const rowData = getRowData(dataSelection.row);
               console.log(`Row data length: ${rowData.length}`);
@@ -398,18 +476,15 @@ const SpreadsheetApp = () => {
               );
               console.log(`Table headers: ${tableResult.headers.join(', ')}`);
               console.log(`Table data rows: ${tableResult.data.length}`);
-              // Convert table data to include headers if they exist
               relevantData = [tableResult.headers, ...tableResult.data];
             }
             break;
           case "search":
             if (dataSelection.searchTerm) {
-              // For search, we might want to include context around the found cells
               console.log(`Searching for term: ${dataSelection.searchTerm}`);
               const ranges = findRangesWithTerm(dataSelection.searchTerm);
               console.log(`Found in cells: ${ranges.join(', ')}`);
               if (ranges.length > 0) {
-                // Just use the first cell found as the top-left of a range
                 const searchRange = `${ranges[0]}:${String.fromCharCode(65 + 10)}${parseInt(ranges[0].match(/\d+/)?.[0] || "1") + 10}`;
                 console.log(`Using range: ${searchRange}`);
                 relevantData = getDataRange(searchRange);
@@ -418,156 +493,67 @@ const SpreadsheetApp = () => {
             break;
           default:
             console.log(`Unrecognized selection type: ${dataSelection.selectionType}, using minimal structure`);
-            // Use minimal structure if the selection type is not recognized
             relevantData = getMinimalStructure();
         }
-      }
-      
-      // Now send the actual analysis request with only the relevant data
-      console.log("relevantData", relevantData);
-      const response = await fetch("/api/llm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message,
-          spreadsheetData: relevantData,
-          activeSheetName: activeSheetName,
-          sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
-          chatHistory: formattedHistory,
-          documentImage: documentImage,
-          dataSelectionMode: false, // This is the analysis phase
-          dataSelectionResult, // Pass the selection result for context
-          columnReference, // Pass the original column reference
-        }),
-        signal: abortController.current.signal,
-      });
+        
+        // Now send the actual analysis request with only the relevant data
+        console.log("relevantData", relevantData);
+        const analysisResponse = await fetch("/api/llm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message,
+            spreadsheetData: relevantData,
+            activeSheetName: activeSheetName,
+            sheetsInfo: sheets.map(sheet => ({ id: sheet.id, name: sheet.name })),
+            chatHistory: formattedHistory,
+            documentImage: documentImage,
+            dataSelectionResult: result,
+            columnReference,
+          }),
+          signal: abortController.current.signal,
+        });
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Could not read response stream.");
-      }
+        const analysisReader = analysisResponse.body?.getReader();
+        if (!analysisReader) {
+          throw new Error("Could not read analysis response stream.");
+        }
 
-      let accumulatedResponse = "";
-      let updates: CellUpdate[] | undefined;
-      let chartData: any | undefined;
-      let lastParsedData: any | undefined;
+        while (true) {
+          const { done, value } = await analysisReader.read();
+          if (done) break;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          const events = chunk.split("\n\n").filter(Boolean);
 
-        const chunk = new TextDecoder().decode(value);
-        const events = chunk.split("\n\n").filter(Boolean);
-
-        for (const event of events) {
-          if (event.startsWith("data: ")) {
-            const jsonData = event.substring(6);
-            try {
-              const parsedData = JSON.parse(jsonData);
-              lastParsedData = parsedData;
+          for (const event of events) {
+            if (event.startsWith("data: ")) {
+              const jsonData = JSON.parse(event.substring(6));
               
-              // Handle sheet operations from LLM
-              if (parsedData.sheetOperation) {
-                const op = parsedData.sheetOperation;
-                
-                if (op.type === 'add' && op.sheetName) {
-                  // Add a new sheet
-                  addSheet();
-                  if (op.initialData) {
-                    // We need to wait for the state update to complete
-                    // before we can access the new sheet
-                    setTimeout(() => {
-                      // Get the last sheet (which should be the one we just added)
-                      const newSheet = sheets[sheets.length - 1];
-                      if (newSheet) {
-                        // We need to use the updateSheetData function from the context
-                        // but we can't directly reference it here due to scope issues
-                        // So we'll dispatch a custom event that the Spreadsheet component can listen for
-                        const customEvent = new CustomEvent('updateNewSheetData', {
-                          detail: {
-                            sheetId: newSheet.id,
-                            data: op.initialData
-                          }
-                        });
-                        window.dispatchEvent(customEvent);
-                      }
-                    }, 0);
-                  }
-                } 
-                else if (op.type === 'rename' && op.currentName && op.newName) {
-                  // Find the sheet by name
-                  const sheet = getSheetByName(op.currentName);
-                  if (sheet) {
-                    // Rename the sheet
-                    renameSheet(sheet.id, op.newName);
-                  }
-                }
-                else if (op.type === 'clear' && op.sheetName) {
-                  // Find the sheet by name
-                  const sheet = getSheetByName(op.sheetName);
-                  if (sheet) {
-                    // Clear the sheet
-                    clearSheet(sheet.id);
-                  }
-                }
-                else if (op.type === 'remove' && op.sheetName) {
-                  // Find the sheet by name
-                  const sheet = getSheetByName(op.sheetName);
-                  if (sheet) {
-                    // Remove the sheet
-                    removeSheet(sheet.id);
-                  }
-                }
-              }
-              
-              if (parsedData.response) {
-                accumulatedResponse = parsedData.response;
-                updates = parsedData.updates;
-                chartData = parsedData.chartData;
-              }
-
               // Update the chat message with current state
               setChatHistory((prev) =>
                 prev.map((msg) =>
                   msg.id === newMessage.id
                     ? {
                         ...msg,
-                        response: accumulatedResponse,
-                        updates: updates,
-                        chartData: chartData,
-                        analysis: parsedData?.analysis,
-                        status: updates || chartData ? "completed" : null,
+                        response: jsonData.response || msg.response,
+                        updates: jsonData.updates || msg.updates,
+                        chartData: jsonData.chartData || msg.chartData,
+                        analysis: jsonData.analysis || msg.analysis,
+                        status: jsonData.updates || jsonData.chartData ? "completed" : msg.status,
                       }
                     : msg
                 )
               );
 
               // Update chart if present
-              if (chartData) {
-                setChartData(chartData);
+              if (jsonData.chartData) {
+                setChartData(jsonData.chartData);
               }
-            } catch (e) {
-              console.error("Error parsing SSE data:", e);
             }
           }
         }
       }
-
-      // Final update
-      setChatHistory((prev) =>
-        prev.map((msg) =>
-          msg.id === newMessage.id
-            ? {
-                ...msg,
-                response: accumulatedResponse,
-                updates: updates,
-                chartData: chartData,
-                analysis: lastParsedData?.analysis,
-                status: updates || chartData ? "completed" : null,
-              }
-            : msg
-        )
-      );
     } catch (error: unknown) {
       if ((error as Error).name === "AbortError" || (error as Error).message === "AbortError") {
         console.log("Request Aborted");

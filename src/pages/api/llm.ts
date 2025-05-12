@@ -28,20 +28,6 @@ const openai = new OpenAI({
 });
 const MODEL = "gpt-4o";
 
-// Define an interface for the spreadsheet structure
-interface SpreadsheetStructure {
-  rowCount: number;
-  colCount: number;
-  hasHeaders: boolean;
-  tables: { range: string; headers: string[] }[];
-  columns: { label: string; index: number }[];
-}
-
-// Define an interface for spreadsheet data with structure
-interface StructuredSpreadsheetData {
-  structure: SpreadsheetStructure;
-}
-
 async function handleLLMRequest(
   message: string,
   spreadsheetData: any[][],
@@ -50,7 +36,6 @@ async function handleLLMRequest(
   sheetsInfo: { id: string; name: string }[] = [],
   res: any,
   documentImage?: string,
-  dataSelectionMode: boolean = false,
   dataSelectionResult?: any,
   columnReference?: string
 ): Promise<void> {
@@ -63,15 +48,13 @@ async function handleLLMRequest(
   });
 
   try {
-    // Choose the appropriate system message based on the mode
-    const systemMessage = dataSelectionMode
-      ? DATA_SELECTION_SYSTEM_MESSAGE
-      : SYSTEM_MESSAGE;
+    // Always use the main system message
+    const systemMessage = SYSTEM_MESSAGE;
 
     // Format context using our utility function
     const spreadsheetContext = formatSpreadsheetContext(
       spreadsheetData,
-      dataSelectionMode,
+
       dataSelectionResult,
       columnReference
     );
@@ -110,21 +93,12 @@ async function handleLLMRequest(
 
     const response = completion.choices[0]?.message?.content || "";
 
-    // Tool completion call with specific tool choice for data selection mode
+    // Tool completion call without forcing specific tool choice
     const toolCompletion = await openai.chat.completions.create({
       messages: [...messages, { role: "assistant", content: response }],
       model: MODEL,
       tools: tools as any,
       stream: false,
-      // Force the use of select_data_for_analysis in data selection mode
-      ...(dataSelectionMode
-        ? {
-            tool_choice: {
-              type: "function",
-              function: { name: "select_data_for_analysis" },
-            },
-          }
-        : {}),
     });
 
     // Check if aborted before processing tool calls
@@ -271,7 +245,6 @@ export default async function handler(req: any, res: any): Promise<void> {
         activeSheetName,
         sheetsInfo,
         documentImage,
-        dataSelectionMode, // New parameter to handle data selection phase
         dataSelectionResult, // Result from data selection phase if in analysis mode
         columnReference, // Original column reference for column selections
       } = req.body;
@@ -308,7 +281,6 @@ export default async function handler(req: any, res: any): Promise<void> {
           sheetsInfo,
           res,
           documentImage,
-          dataSelectionMode,
           dataSelectionResult,
           columnReference
         ),

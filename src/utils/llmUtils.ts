@@ -13,25 +13,67 @@ interface SpreadsheetStructure {
 // Define an interface for spreadsheet data with structure
 interface StructuredSpreadsheetData {
   structure: SpreadsheetStructure;
+  metadata?: {
+    dimensions: {
+      rowCount: number;
+      colCount: number;
+      usedRowCount: number;
+      usedColCount: number;
+    };
+    dataRegions: {
+      startRow: number;
+      startCol: number;
+      endRow: number;
+      endCol: number;
+      type: "table" | "list" | "scattered";
+      hasHeaders: boolean;
+      headers?: string[];
+      rowCount: number;
+      colCount: number;
+      density: number;
+    }[];
+    columnStats: {
+      index: number;
+      label: string;
+      nonEmptyCount: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+      sampleValues: any[];
+    }[];
+    rowStats: {
+      index: number;
+      nonEmptyCount: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+    }[];
+    overallStats: {
+      totalCells: number;
+      nonEmptyCells: number;
+      dataDensity: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+    };
+  };
 }
 
 // Helper function to format spreadsheet data based on selection result
 export function formatSpreadsheetContext(
   spreadsheetData: any[][],
-  dataSelectionMode: boolean = false,
   dataSelectionResult?: any,
   columnReference?: string
 ): string {
-  if (dataSelectionMode) {
-    // For data selection phase, only include minimal structural info
-    if (
-      typeof spreadsheetData === "object" &&
-      spreadsheetData !== null &&
-      "structure" in spreadsheetData
-    ) {
-      // If we received pre-analyzed structure info
-      const structuredData = spreadsheetData as StructuredSpreadsheetData;
-      return `Spreadsheet Structure Information:
+  // If we received pre-analyzed structure info
+  if (
+    typeof spreadsheetData === "object" &&
+    spreadsheetData !== null &&
+    "structure" in spreadsheetData
+  ) {
+    // If we received pre-analyzed structure info
+    const structuredData = spreadsheetData as StructuredSpreadsheetData;
+    let context = `Spreadsheet Structure Information:
 Row Count: ${structuredData.structure.rowCount}
 Column Count: ${structuredData.structure.colCount}
 Has Headers: ${structuredData.structure.hasHeaders}
@@ -51,13 +93,50 @@ ${structuredData.structure.columns
       `- ${col.label} (index: ${col.index})`
   )
   .join("\n")}`;
-    } else {
-      // Just use a sample of the data with the updated sampleMode parameter
-      return `Sample of spreadsheet data (first few rows):
-${formatSpreadsheetData(spreadsheetData, true, 10)}`; // Use sample mode with 10 rows
+
+    // Add metadata information if available
+    if (structuredData.metadata) {
+      const { metadata } = structuredData;
+      context += `\n\nData Occupancy Information:
+Total Dimensions: ${metadata.dimensions.rowCount} rows × ${
+        metadata.dimensions.colCount
+      } columns
+Used Dimensions: ${metadata.dimensions.usedRowCount} rows × ${
+        metadata.dimensions.usedColCount
+      } columns
+Overall Data Density: ${metadata.overallStats.dataDensity.toFixed(1)}%
+
+Data Regions:
+${metadata.dataRegions
+  .map(
+    (region) =>
+      `- Type: ${region.type}
+  Range: ${String.fromCharCode(65 + region.startCol)}${
+        region.startRow + 1
+      }:${String.fromCharCode(65 + region.endCol)}${region.endRow + 1}
+  Size: ${region.rowCount} rows × ${region.colCount} columns
+  Density: ${region.density.toFixed(1)}%
+  ${region.hasHeaders ? `Headers: ${region.headers?.join(", ")}` : ""}`
+  )
+  .join("\n")}
+
+Column Statistics:
+${metadata.columnStats
+  .filter((col) => col.nonEmptyCount > 0)
+  .map(
+    (col) =>
+      `- Column ${col.label}:
+    Non-empty cells: ${col.nonEmptyCount}
+    Data types: ${Object.entries(col.dataTypes)
+      .map(([type, count]) => `${type}: ${count}`)
+      .join(", ")}
+    Sample values: ${col.sampleValues.join(", ")}`
+  )
+  .join("\n")}`;
     }
+
+    return context;
   } else {
-    // For analysis phase (normal mode), format the actual data
     // If we have a data selection result, mention it in the context
     if (dataSelectionResult) {
       if (

@@ -15,7 +15,8 @@ import {
   extractRowData,
   extractTableData,
   findDataRanges,
-  getMinimalSheetStructure
+  getMinimalSheetStructure,
+  getSpreadsheetMetadata
 } from "@/utils/preprocess";
 
 import { CellUpdate } from "@/types/api";
@@ -58,6 +59,50 @@ interface SpreadsheetContextType {
   getMinimalStructure: () => any[][];
   analyzeActiveSheetStructure: () => any;
   findRangesWithTerm: (searchTerm: string) => string[];
+  SpreadsheetMetadata: () => {
+    dimensions: {
+      rowCount: number;
+      colCount: number;
+      usedRowCount: number;
+      usedColCount: number;
+    };
+    dataRegions: {
+      startRow: number;
+      startCol: number;
+      endRow: number;
+      endCol: number;
+      type: 'table' | 'list' | 'scattered';
+      hasHeaders: boolean;
+      headers?: string[];
+      rowCount: number;
+      colCount: number;
+      density: number;
+    }[];
+    columnStats: {
+      index: number;
+      label: string;
+      nonEmptyCount: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+      sampleValues: any[];
+    }[];
+    rowStats: {
+      index: number;
+      nonEmptyCount: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+    }[];
+    overallStats: {
+      totalCells: number;
+      nonEmptyCells: number;
+      dataDensity: number;
+      dataTypes: {
+        [key: string]: number;
+      };
+    };
+  };
 }
 
 const SpreadsheetContext = createContext<SpreadsheetContextType | undefined>(
@@ -685,6 +730,26 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
     return findDataRanges(activeSheet.data, searchTerm);
   };
 
+  const spreadsheetMetadata = () => {
+    const activeSheet = sheets.find(sheet => sheet.id === activeSheetId);
+    if (!activeSheet?.data) {
+      return {
+        dimensions: { rowCount: 0, colCount: 0, usedRowCount: 0, usedColCount: 0 },
+        dataRegions: [],
+        columnStats: [],
+        rowStats: [],
+        overallStats: {
+          totalCells: 0,
+          nonEmptyCells: 0,
+          dataDensity: 0,
+          dataTypes: {}
+        }
+      };
+    }
+    
+    return getSpreadsheetMetadata(activeSheet.data);
+  };
+
   // Show loading state if still loading data from IndexedDB
   if (isLoading) {
     return <div>Loading spreadsheet data...</div>;
@@ -721,6 +786,7 @@ export const SpreadsheetProvider: React.FC<{ children: React.ReactNode }> = ({
         getMinimalStructure,
         analyzeActiveSheetStructure,
         findRangesWithTerm,
+        SpreadsheetMetadata: spreadsheetMetadata,
       }}
     >
       {children}
