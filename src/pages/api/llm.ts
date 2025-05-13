@@ -1,8 +1,4 @@
 import {
-  DATA_SELECTION_SYSTEM_MESSAGE,
-  SYSTEM_MESSAGE,
-} from "@/constants/messages";
-import {
   formatSheetsContext,
   formatSpreadsheetContext,
   formatUserMessageContent,
@@ -18,6 +14,7 @@ import {
 } from "@/utils/toolHandlers";
 
 import { OpenAI } from "openai";
+import { SYSTEM_MESSAGE } from "@/constants/messages";
 import dotenv from "dotenv";
 import { tools } from "@/constants/tools";
 
@@ -54,7 +51,6 @@ async function handleLLMRequest(
     // Format context using our utility function
     const spreadsheetContext = formatSpreadsheetContext(
       spreadsheetData,
-
       dataSelectionResult,
       columnReference
     );

@@ -184,12 +184,10 @@ const SpreadsheetApp = () => {
       // Get the active sheet information
       const activeSheetName = getActiveSheetName();
       
-      // PHASE 1: Data Selection
+     
       // First, analyze the spreadsheet structure to determine what data is needed
       const structureInfo = analyzeActiveSheetStructure();
       const metadata = SpreadsheetMetadata();
-      
-      console.log("Starting data selection phase...");
       
       const response = await fetch("/api/llm", {
         method: "POST",
@@ -244,7 +242,7 @@ const SpreadsheetApp = () => {
             
             // Try to extract complete event chunks
             const events = chunk.split("\n\n").filter(Boolean);
-            
+            console.log("events", events);
             // Process complete events
             for (const event of events) {
               if (event.startsWith("data: ")) {
@@ -304,11 +302,13 @@ const SpreadsheetApp = () => {
                     return;
                   } else if (jsonData.chartData) {
                     // Handle chart data
+                    console.log("chartData", jsonData.chartData);
                     result = {
                       chartData: jsonData.chartData,
                       response: jsonData.response
                     };
                     
+                    console.log("chartData", jsonData.chartData);
                     // Update the chat message with the response
                     setChatHistory((prev) =>
                       prev.map((msg) =>
@@ -322,6 +322,8 @@ const SpreadsheetApp = () => {
                           : msg
                       )
                     );
+                    
+                    setChartData(jsonData.chartData);
                     
                     // Clear the timeout and resolve with the result
                     if (timeout) {
@@ -337,6 +339,25 @@ const SpreadsheetApp = () => {
                       response: jsonData.response
                     };
                     
+                    const operation = jsonData.sheetOperation;
+                    if (operation.type == "rename_sheet" && operation.newName && operation.currentName) {
+                      const sheet = getSheetByName(operation.currentName);
+                      if (sheet) {
+                        renameSheet(sheet.id, operation.newName);
+                      }
+                    } else if (operation.type == "clear_sheet" && operation.sheetName) {
+                      const sheet = getSheetByName(operation.sheetName);
+                      if (sheet) {
+                        clearSheet(sheet.id);
+                      }
+                    } else if (operation.type == "add_sheet" && operation.sheetName) {
+                      addSheet();
+                    } else if (operation.type == "remove_sheet" && operation.sheetName) {
+                      const sheet = getSheetByName(operation.sheetName);
+                      if (sheet) {
+                        removeSheet(sheet.id);
+                      }
+                    }
                     // Update the chat message with the response
                     setChatHistory((prev) =>
                       prev.map((msg) =>
@@ -545,11 +566,6 @@ const SpreadsheetApp = () => {
                     : msg
                 )
               );
-
-              // Update chart if present
-              if (jsonData.chartData) {
-                setChartData(jsonData.chartData);
-              }
             }
           }
         }

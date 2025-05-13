@@ -1,4 +1,3 @@
-import { OpenAI } from "openai";
 import { formatSpreadsheetData } from "./analysisUtils";
 
 // Define an interface for the spreadsheet structure
